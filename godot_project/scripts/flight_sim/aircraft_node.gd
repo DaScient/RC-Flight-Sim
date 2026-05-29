@@ -45,6 +45,11 @@ func _ready() -> void:
 	fdm.load_aircraft(aircraft_config_path)
 	_setup_components()
 
+	# Let Agentic Mode read this aircraft's telemetry / drive the co-pilot.
+	var mgr := get_node_or_null("/root/AgenticManager")
+	if mgr != null and mgr.has_method("register_aircraft"):
+		mgr.register_aircraft(self)
+
 func _physics_process(delta: float) -> void:
 	if fdm == null:
 		return
@@ -67,6 +72,11 @@ func _physics_process(delta: float) -> void:
 		MathUtils.apply_rates_expo(inputs["rudder"], rudder_rate, expo))
 	fdm.set_control_surface(FDMInterface.SURFACE_THROTTLE, inputs["throttle"])
 
+	# 2b. Experimental Agentic Mode: if the AI co-pilot is demonstrating a
+	# maneuver it overrides the human inputs (clamped + safety-limited inside
+	# AgenticManager). Moving any stick aborts it. No-op when mode is off.
+	_apply_copilot_override(delta, inputs)
+
 	# 3. Step the FDM.
 	fdm.update_fdm(delta, global_transform)
 
@@ -78,6 +88,23 @@ func _physics_process(delta: float) -> void:
 	# 5. Drive components with the new state snapshot.
 	for c in _components:
 		c.physics_tick(delta, state)
+
+# ---------------------------------------------------------------------------
+# Agentic Mode co-pilot
+# ---------------------------------------------------------------------------
+## Query AgenticManager for an AI control override and, if present, write it to
+## the FDM control surfaces (replacing the human inputs for this frame).
+func _apply_copilot_override(delta: float, inputs: Dictionary) -> void:
+	var mgr := get_node_or_null("/root/AgenticManager")
+	if mgr == null or not mgr.has_method("get_copilot_override"):
+		return
+	var override: Dictionary = mgr.get_copilot_override(delta, fdm.get_state(), inputs)
+	if override.is_empty():
+		return
+	fdm.set_control_surface(FDMInterface.SURFACE_AILERON,  float(override.get("aileron", 0.0)))
+	fdm.set_control_surface(FDMInterface.SURFACE_ELEVATOR, float(override.get("elevator", 0.0)))
+	fdm.set_control_surface(FDMInterface.SURFACE_RUDDER,   float(override.get("rudder", 0.0)))
+	fdm.set_control_surface(FDMInterface.SURFACE_THROTTLE, float(override.get("throttle", 0.0)))
 
 # ---------------------------------------------------------------------------
 # Component wiring

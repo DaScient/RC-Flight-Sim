@@ -20,6 +20,7 @@ func _initialize() -> void:
 		TestMathUtils,
 		TestConfigParser,
 		TestSimConsole,
+		TestAgenticUtils,
 	]
 	for suite_class in suites:
 		var suite: Object = suite_class.new()
