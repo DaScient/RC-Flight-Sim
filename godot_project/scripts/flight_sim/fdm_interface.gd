@@ -3,6 +3,7 @@
 ## When the JSBSim GDExtension is available it delegates to JSBSimFDM;
 ## otherwise it falls back to a built-in kinematic model suitable for
 ## simple testing without native library compilation.
+class_name FDMInterface
 extends Node
 
 # ---------------------------------------------------------------------------
@@ -130,9 +131,9 @@ func _read_jsbsim_state() -> void:
 	state["throttle_pos"] = _controls[SURFACE_THROTTLE]
 
 	# Extract body-frame forces → world position/velocity update is handled by AircraftNode
-	var vx := _jsbsim_node.get_property("velocities/v-east-fps")  * 0.3048
-	var vy := _jsbsim_node.get_property("velocities/v-up-fps")    * 0.3048
-	var vz := _jsbsim_node.get_property("velocities/v-north-fps") * 0.3048
+	var vx := float(_jsbsim_node.get_property("velocities/v-east-fps"))  * 0.3048
+	var vy := float(_jsbsim_node.get_property("velocities/v-up-fps"))    * 0.3048
+	var vz := float(_jsbsim_node.get_property("velocities/v-north-fps")) * 0.3048
 	state["velocity"] = Vector3(vx, vy, -vz)  # Godot Y-up, Z-forward
 
 	var roll_deg  := rad_to_deg(_jsbsim_node.get_property("attitude/roll-rad"))
@@ -186,9 +187,9 @@ func _step_kinematic(delta: float, transform: Transform3D) -> void:
 	var wing_area: float = cfg.get("wing_area_m2", 0.25)
 
 	# Aerodynamic forces in body frame
-	var cl := cl_alpha * aoa_rad + cfg.get("cl0", 0.3)
+	var cl := cl_alpha * aoa_rad + float(cfg.get("cl0", 0.3))
 	cl = clampf(cl, -1.5, 1.5)
-	var cd := cd0 + (cl * cl) / (PI * cfg.get("aspect_ratio", 5.8) * cfg.get("oswald", 0.8))
+	var cd := cd0 + (cl * cl) / (PI * float(cfg.get("aspect_ratio", 5.8)) * float(cfg.get("oswald", 0.8)))
 	var lift_n := q * wing_area * cl
 	var drag_n := q * wing_area * cd
 

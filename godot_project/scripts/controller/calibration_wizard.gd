@@ -30,7 +30,7 @@ enum Step {
 var _step: Step = Step.WELCOME
 
 # Channel currently being calibrated
-const CHANNELS := ["aileron", "elevator", "throttle", "rudder"]
+const CHANNELS: Array[String] = ["aileron", "elevator", "throttle", "rudder"]
 var _current_channel_idx: int = 0
 
 # Recorded min/max/center for each channel
@@ -131,19 +131,25 @@ func _commit_current_step() -> void:
 		Step.MOVE_AILERON, Step.MOVE_ELEVATOR, Step.MOVE_THROTTLE, Step.MOVE_RUDDER:
 			# The readout has been continuously updating; just save recorded values
 			var ch := _get_channel_for_step(_step)
-			var axis_idx: int = _working_cal.get("axis_map", {}).get(ch, 0)
-			_working_cal.get_or_add("range_min", {})[ch] = _recorded.get(ch + "_min", -1.0)
-			_working_cal.get_or_add("range_max", {})[ch] = _recorded.get(ch + "_max",  1.0)
+			_cal_section("range_min")[ch] = _recorded.get(ch + "_min", -1.0)
+			_cal_section("range_max")[ch] = _recorded.get(ch + "_max",  1.0)
 		Step.SET_CENTER:
 			for ch in CHANNELS:
 				var axis_idx: int = _working_cal.get("axis_map", {}).get(ch, 0)
-				_working_cal.get_or_add("center", {})[ch] = InputManager.get_raw_axis(dev_id, axis_idx)
+				_cal_section("center")[ch] = InputManager.get_raw_axis(dev_id, axis_idx)
 		Step.REVERSE_AXES:
 			var ch := CHANNELS[_current_channel_idx]
-			_working_cal.get_or_add("reversed", {})[ch] = _reverse_check.button_pressed
+			_cal_section("reversed")[ch] = _reverse_check.button_pressed
 		Step.SET_DEADZONE:
 			var ch := CHANNELS[_current_channel_idx]
-			_working_cal.get_or_add("deadzone", {})[ch] = _deadzone_slider.value
+			_cal_section("deadzone")[ch] = _deadzone_slider.value
+
+## Return the named sub-dictionary of the working calibration, creating it if
+## absent. (Replaces Dictionary.get_or_add(), which requires Godot 4.4+.)
+func _cal_section(section: String) -> Dictionary:
+	if not _working_cal.has(section):
+		_working_cal[section] = {}
+	return _working_cal[section]
 
 func _update_readout() -> void:
 	var dev_id := InputManager.get_active_device()

@@ -41,7 +41,7 @@ func _ready() -> void:
 	_cameras[CameraMode.FREE_ORBIT] = free_orbit_camera
 
 	# Apply saved preference
-	var saved := SettingsManager.get_setting("camera_mode", "chase")
+	var saved: String = SettingsManager.get_setting("camera_mode", "chase")
 	match saved:
 		"fpv":        set_camera(CameraMode.FPV)
 		"stationary": set_camera(CameraMode.STATIONARY)

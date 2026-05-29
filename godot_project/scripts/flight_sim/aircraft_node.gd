@@ -1,7 +1,15 @@
 ## aircraft_node.gd
 ## Main aircraft node. Reads inputs from InputManager, drives the FDMInterface,
-## and applies the resulting physics state to the Node3D transform.
-## Attach this script to a Node3D (or RigidBody3D) that represents the aircraft.
+## applies the resulting physics state to the transform, and dispatches that
+## state to modular components (Propulsion, Aerodynamics, Damage, Sound).
+##
+## Component-based design (Part 4 refactor): per-frame behaviour lives in small
+## AircraftComponent subclasses instead of this monolith. Components may be
+## added as child nodes in the scene; any that are missing are created with
+## sensible defaults so existing scenes keep working.
+##
+## Determinism: all simulation runs in _physics_process and avoids delta-scaled
+## randomness (see Atmosphere for the gust model, which is seeded separately).
 class_name AircraftNode
 extends Node3D
 
@@ -10,7 +18,7 @@ extends Node3D
 # ---------------------------------------------------------------------------
 @export var aircraft_config_path: String = "res://assets/aircraft/trainer/trainer.json"
 @export var engine_audio: AudioStreamPlayer3D = null
-@export var propeller_mesh: MeshInstance3D   = null
+@export var propeller_mesh: MeshInstance3D = null
 
 # ---------------------------------------------------------------------------
 # Child node references
@@ -18,62 +26,106 @@ extends Node3D
 @onready var fdm: FDMInterface = $FDMInterface as FDMInterface
 
 # ---------------------------------------------------------------------------
+# Components
+# ---------------------------------------------------------------------------
+var propulsion: PropulsionComponent = null
+var aerodynamics: AerodynamicsComponent = null
+var damage: DamageComponent = null
+var sound: SoundComponent = null
+
+var _components: Array[AircraftComponent] = []
+
+# ---------------------------------------------------------------------------
 # Lifecycle
 # ---------------------------------------------------------------------------
 func _ready() -> void:
-if fdm == null:
-push_error("[AircraftNode] FDMInterface child node not found!")
-return
-fdm.load_aircraft(aircraft_config_path)
+	if fdm == null:
+		push_error("[AircraftNode] FDMInterface child node not found!")
+		return
+	fdm.load_aircraft(aircraft_config_path)
+	_setup_components()
 
 func _physics_process(delta: float) -> void:
-if fdm == null:
-return
+	if fdm == null:
+		return
 
-# 1. Read smoothed inputs from InputManager
-var inputs := InputManager.channels
+	# 1. Read smoothed inputs from InputManager.
+	var inputs: Dictionary = InputManager.channels
 
-# 2. Apply expo/dual-rates from aircraft config
-var cfg := fdm.aircraft_config
-var aileron_rate:  float = cfg.get("aileron_rate",  1.0)
-var elevator_rate: float = cfg.get("elevator_rate", 1.0)
-var rudder_rate:   float = cfg.get("rudder_rate",   1.0)
-var expo: float = cfg.get("expo", 0.3)
+	# 2. Apply expo / dual-rates from aircraft config (via MathUtils).
+	var cfg := fdm.aircraft_config
+	var aileron_rate: float = ConfigLoader.get_number(cfg, "aileron_rate", 1.0)
+	var elevator_rate: float = ConfigLoader.get_number(cfg, "elevator_rate", 1.0)
+	var rudder_rate: float = ConfigLoader.get_number(cfg, "rudder_rate", 1.0)
+	var expo: float = ConfigLoader.get_number(cfg, "expo", 0.3)
 
-fdm.set_control_surface(FDMInterface.SURFACE_AILERON,  _apply_expo(inputs["aileron"],  expo) * aileron_rate)
-fdm.set_control_surface(FDMInterface.SURFACE_ELEVATOR, _apply_expo(inputs["elevator"], expo) * elevator_rate)
-fdm.set_control_surface(FDMInterface.SURFACE_RUDDER,   _apply_expo(inputs["rudder"],   expo) * rudder_rate)
-fdm.set_control_surface(FDMInterface.SURFACE_THROTTLE, inputs["throttle"])
+	fdm.set_control_surface(FDMInterface.SURFACE_AILERON,
+		MathUtils.apply_rates_expo(inputs["aileron"], aileron_rate, expo))
+	fdm.set_control_surface(FDMInterface.SURFACE_ELEVATOR,
+		MathUtils.apply_rates_expo(inputs["elevator"], elevator_rate, expo))
+	fdm.set_control_surface(FDMInterface.SURFACE_RUDDER,
+		MathUtils.apply_rates_expo(inputs["rudder"], rudder_rate, expo))
+	fdm.set_control_surface(FDMInterface.SURFACE_THROTTLE, inputs["throttle"])
 
-# 3. Step the FDM
-fdm.update_fdm(delta, global_transform)
+	# 3. Step the FDM.
+	fdm.update_fdm(delta, global_transform)
 
-# 4. Apply resulting state to transform
-var state := fdm.get_state()
-global_position = state["position"]
-global_transform.basis = Basis(state["orientation"])
+	# 4. Apply resulting state to the transform.
+	var state := fdm.get_state()
+	global_position = state["position"]
+	global_transform.basis = Basis(state["orientation"])
 
-# 5. Animate propeller
-if propeller_mesh != null:
-var rpm: float = state.get("engine_rpm", 0.0)
-propeller_mesh.rotation.z += deg_to_rad(rpm / 60.0 * 360.0 * delta)
+	# 5. Drive components with the new state snapshot.
+	for c in _components:
+		c.physics_tick(delta, state)
 
-# 6. Drive engine audio pitch by RPM
-if engine_audio != null:
-var rpm: float = state.get("engine_rpm", 0.0)
-var max_rpm: float = cfg.get("max_rpm", 10000.0)
-engine_audio.pitch_scale = clampf(0.4 + (rpm / max_rpm) * 1.4, 0.4, 1.8)
-engine_audio.volume_db   = linear_to_db(clampf(rpm / max_rpm, 0.05, 1.0))
+# ---------------------------------------------------------------------------
+# Component wiring
+# ---------------------------------------------------------------------------
+func _setup_components() -> void:
+	propulsion = _ensure_component("Propulsion", PropulsionComponent) as PropulsionComponent
+	aerodynamics = _ensure_component("Aerodynamics", AerodynamicsComponent) as AerodynamicsComponent
+	damage = _ensure_component("Damage", DamageComponent) as DamageComponent
+	sound = _ensure_component("Sound", SoundComponent) as SoundComponent
 
-## Called by external systems (e.g., camera) to get current airspeed
+	# Wire legacy exported nodes into the relevant components.
+	if propeller_mesh != null:
+		propulsion.propeller_mesh = propeller_mesh
+	if engine_audio != null:
+		sound.engine_audio = engine_audio
+
+	_components = [propulsion, aerodynamics, damage, sound]
+	for c in _components:
+		c.setup(self)
+
+	# Cross-component signal hookups.
+	if damage != null and sound != null:
+		damage.prop_strike.connect(sound.on_prop_strike)
+
+## Return an existing child component of [param type] named [param node_name],
+## or create one if absent so older scenes without components still function.
+func _ensure_component(node_name: String, type: GDScript) -> AircraftComponent:
+	var existing := get_node_or_null(node_name)
+	if existing != null and existing is AircraftComponent:
+		return existing
+	var comp: AircraftComponent = type.new()
+	comp.name = node_name
+	add_child(comp)
+	return comp
+
+# ---------------------------------------------------------------------------
+# Public accessors (used by camera, HUD, components)
+# ---------------------------------------------------------------------------
+## Merged aircraft configuration (base JSON + tuning overrides), via FDM.
+func get_config() -> Dictionary:
+	return fdm.aircraft_config if fdm != null else {}
+
+## Normalised propulsion power level in [0, 1]; used by Damage/Sound/dust FX.
+func get_power_level() -> float:
+	return propulsion.get_power_level() if propulsion != null else 0.0
+
 func get_airspeed() -> float:
-return fdm.state.get("airspeed_ms", 0.0)
+	return fdm.state.get("airspeed_ms", 0.0) if fdm != null else 0.0
 
-## Called by external systems to get altitude
 func get_altitude() -> float:
-return fdm.state.get("altitude_m", 0.0)
-
-## Apply exponential curve to a control input value.
-## v: raw input [-1, 1]; e: expo factor [0, 1] (0 = linear, 1 = maximum curve)
-func _apply_expo(v: float, e: float) -> float:
-return v * (absf(v) * e + (1.0 - e))
+	return fdm.state.get("altitude_m", 0.0) if fdm != null else 0.0
