@@ -38,15 +38,15 @@ func _process(_delta: float) -> void:
 	var state := aircraft.fdm.get_state()
 
 	# Airspeed (m/s → km/h for display)
-	var airspeed_kmh := state.get("airspeed_ms", 0.0) * 3.6
+	var airspeed_kmh: float = float(state.get("airspeed_ms", 0.0)) * 3.6
 	_label_airspeed.text = "SPD: %.1f km/h" % airspeed_kmh
 
 	# Altitude (m)
-	var alt := state.get("altitude_m", 0.0)
+	var alt: float = float(state.get("altitude_m", 0.0))
 	_label_altitude.text = "ALT: %.1f m" % alt
 
 	# Throttle percentage
-	var thr := state.get("throttle_pos", 0.0) * 100.0
+	var thr: float = float(state.get("throttle_pos", 0.0)) * 100.0
 	_label_throttle.text = "THR: %.0f%%" % thr
 
 	# Camera mode
@@ -54,7 +54,7 @@ func _process(_delta: float) -> void:
 		_label_camera.text = "CAM: %s" % camera_manager._mode_to_string(camera_manager.current_mode).to_upper()
 
 	# Attitude indicator: update via euler angles
-	var euler := state.get("euler_deg", Vector3.ZERO)
+	var euler: Vector3 = state.get("euler_deg", Vector3.ZERO)
 	_update_attitude_indicator(euler.x, euler.z)
 
 ## Simple artificial horizon drawing

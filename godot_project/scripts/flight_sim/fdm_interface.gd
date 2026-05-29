@@ -3,6 +3,7 @@
 ## When the JSBSim GDExtension is available it delegates to JSBSimFDM;
 ## otherwise it falls back to a built-in kinematic model suitable for
 ## simple testing without native library compilation.
+class_name FDMInterface
 extends Node
 
 # ---------------------------------------------------------------------------
@@ -90,6 +91,43 @@ func set_control_surface(surface: String, value: float) -> void:
 func get_state() -> Dictionary:
 	return state.duplicate()
 
+## Return a copy of the current control-surface command values.
+## Keys: aileron, elevator, rudder, throttle, flap (range [-1,1]; throttle [0,1]).
+func get_controls() -> Dictionary:
+	return _controls.duplicate()
+
+## Return a property-tree snapshot for the telemetry/HUD overlay (Part 3A).
+## With the JSBSim backend this is the native curated property tree; with the
+## kinematic fallback it is synthesised from the current state so the overlay
+## works in both modes.
+func get_property_tree() -> Dictionary:
+	if backend == FDMBackend.JSBSIM and _jsbsim_node != null and _jsbsim_node.has_method("get_property_tree"):
+		return _jsbsim_node.get_property_tree()
+	return {
+		"velocities/vt-mps":       state.get("airspeed_ms", 0.0),
+		"position/h-agl-m":        state.get("altitude_m", 0.0),
+		"aero/alpha-deg":          state.get("aoa_deg", 0.0),
+		"propulsion/engine/rpm":   state.get("engine_rpm", 0.0),
+		"fcs/throttle-cmd-norm":   _controls[SURFACE_THROTTLE],
+		"fcs/aileron-cmd-norm":    _controls[SURFACE_AILERON],
+		"fcs/elevator-cmd-norm":   _controls[SURFACE_ELEVATOR],
+		"fcs/rudder-cmd-norm":     _controls[SURFACE_RUDDER],
+	}
+
+## Set an arbitrary simulation property at runtime (used by the sim console,
+## Part 3A). With JSBSim this writes to the native property tree; with the
+## kinematic backend it maps the common fcs/* control paths onto the controls.
+func set_property(path: String, value: float) -> bool:
+	if backend == FDMBackend.JSBSIM and _jsbsim_node != null and _jsbsim_node.has_method("set_property"):
+		_jsbsim_node.set_property(path, value)
+		return true
+	match path:
+		"fcs/aileron-cmd-norm":  set_control_surface(SURFACE_AILERON, value); return true
+		"fcs/elevator-cmd-norm": set_control_surface(SURFACE_ELEVATOR, value); return true
+		"fcs/rudder-cmd-norm":   set_control_surface(SURFACE_RUDDER, value); return true
+		"fcs/throttle-cmd-norm": set_control_surface(SURFACE_THROTTLE, value); return true
+	return false
+
 ## Load aircraft definition and initialize FDM.
 func load_aircraft(config_path: String) -> void:
 	var f := FileAccess.open(config_path, FileAccess.READ)
@@ -103,10 +141,40 @@ func load_aircraft(config_path: String) -> void:
 		push_error("[FDMInterface] JSON parse error in %s: %s" % [config_path, json.get_error_message()])
 		return
 	aircraft_config = json.get_data()
+
+	# Apply optional tuning.json overrides located next to the aircraft config
+	# (Part 2B). This lets advanced users retune mass, control effectiveness,
+	# drag, engine power, etc. without editing the base definition or XML.
+	_apply_tuning_overrides(config_path)
+
 	if backend == FDMBackend.JSBSIM and _jsbsim_node != null:
 		var xml_path: String = aircraft_config.get("jsbsim_xml", "")
 		if xml_path != "":
 			_jsbsim_node.load_aircraft(xml_path)
+		_apply_tuning_to_jsbsim()
+
+## Merge a sibling `tuning.json` (if present) over the loaded aircraft config.
+func _apply_tuning_overrides(config_path: String) -> void:
+	var tuning_path := config_path.get_base_dir().path_join("tuning.json")
+	if not FileAccess.file_exists(tuning_path):
+		return
+	var err_out: Array = [""]
+	var tuning := ConfigLoader.load_json_file(tuning_path, err_out)
+	if tuning.is_empty():
+		if String(err_out[0]) != "":
+			push_warning("[FDMInterface] Ignoring tuning.json: %s" % err_out[0])
+		return
+	aircraft_config = ConfigLoader.deep_merge(aircraft_config, tuning)
+	print("[FDMInterface] Applied tuning overrides from %s" % tuning_path)
+
+## Push tuning multipliers that have direct JSBSim analogues into the FDM.
+func _apply_tuning_to_jsbsim() -> void:
+	if _jsbsim_node == null:
+		return
+	# Common, safe property-tree scalings. Missing keys default to 1.0 (no-op).
+	var power: float = ConfigLoader.get_number(aircraft_config, "engine_power_factor", 1.0, 0.0, 10.0)
+	if not is_equal_approx(power, 1.0):
+		_jsbsim_node.set_property("propulsion/engine/power-hp-factor", power)
 
 ## Step the FDM by delta seconds (called from AircraftNode._physics_process).
 func update_fdm(delta: float, transform: Transform3D) -> void:
@@ -130,9 +198,9 @@ func _read_jsbsim_state() -> void:
 	state["throttle_pos"] = _controls[SURFACE_THROTTLE]
 
 	# Extract body-frame forces → world position/velocity update is handled by AircraftNode
-	var vx := _jsbsim_node.get_property("velocities/v-east-fps")  * 0.3048
-	var vy := _jsbsim_node.get_property("velocities/v-up-fps")    * 0.3048
-	var vz := _jsbsim_node.get_property("velocities/v-north-fps") * 0.3048
+	var vx := float(_jsbsim_node.get_property("velocities/v-east-fps"))  * 0.3048
+	var vy := float(_jsbsim_node.get_property("velocities/v-up-fps"))    * 0.3048
+	var vz := float(_jsbsim_node.get_property("velocities/v-north-fps")) * 0.3048
 	state["velocity"] = Vector3(vx, vy, -vz)  # Godot Y-up, Z-forward
 
 	var roll_deg  := rad_to_deg(_jsbsim_node.get_property("attitude/roll-rad"))
@@ -163,6 +231,14 @@ func _step_kinematic(delta: float, transform: Transform3D) -> void:
 	var max_rpm: float  = cfg.get("max_rpm", 10000.0)
 	var thrust_n: float = cfg.get("max_thrust_n", 15.0)
 
+	# Tuning multipliers (Part 2B). Default 1.0 = no change.
+	var power_factor: float    = ConfigLoader.get_number(cfg, "engine_power_factor", 1.0, 0.0, 10.0)
+	var drag_mult: float       = ConfigLoader.get_number(cfg, "drag_multiplier", 1.0, 0.0, 10.0)
+	var aileron_effect: float  = ConfigLoader.get_number(cfg, "aileron_effectiveness", 1.0, 0.0, 10.0)
+	var inertia_scale: float   = ConfigLoader.get_number(cfg, "inertia_scale", 1.0, 0.01, 100.0)
+	mass *= ConfigLoader.get_number(cfg, "mass_factor", 1.0, 0.01, 100.0)
+	thrust_n *= power_factor
+
 	var throttle: float  = _controls[SURFACE_THROTTLE]
 	var aileron: float   = _controls[SURFACE_AILERON]
 	var elevator: float  = _controls[SURFACE_ELEVATOR]
@@ -181,16 +257,17 @@ func _step_kinematic(delta: float, transform: Transform3D) -> void:
 		aoa_rad = atan2(-local_vel.y, -local_vel.z)
 	state["aoa_deg"] = rad_to_deg(aoa_rad)
 
-	# Dynamic pressure
-	var q := 0.5 * Atmosphere.air_density * airspeed * airspeed
+	# Dynamic pressure (uses altitude-dependent ISA density, Part 3B)
+	var rho := Atmosphere.get_density_at_altitude(transform.origin.y)
+	var q := 0.5 * rho * airspeed * airspeed
 	var wing_area: float = cfg.get("wing_area_m2", 0.25)
 
 	# Aerodynamic forces in body frame
-	var cl := cl_alpha * aoa_rad + cfg.get("cl0", 0.3)
+	var cl := cl_alpha * aoa_rad + float(cfg.get("cl0", 0.3))
 	cl = clampf(cl, -1.5, 1.5)
-	var cd := cd0 + (cl * cl) / (PI * cfg.get("aspect_ratio", 5.8) * cfg.get("oswald", 0.8))
+	var cd := cd0 + (cl * cl) / (PI * float(cfg.get("aspect_ratio", 5.8)) * float(cfg.get("oswald", 0.8)))
 	var lift_n := q * wing_area * cl
-	var drag_n := q * wing_area * cd
+	var drag_n := q * wing_area * cd * drag_mult
 
 	# Lift acts perpendicular to velocity in the lift plane; drag opposes velocity
 	var lift_dir := transform.basis.y  # approximation: vertical in body frame
@@ -233,8 +310,10 @@ func _step_kinematic(delta: float, transform: Transform3D) -> void:
 	var pitch_rate_max := deg_to_rad(cfg.get("max_pitch_rate_dps",  90.0))
 	var yaw_rate_max   := deg_to_rad(cfg.get("max_yaw_rate_dps",    60.0))
 
-	var speed_factor := clampf(airspeed / 10.0, 0.0, 1.0)
-	_kin_ang_vel.x = aileron  * roll_rate_max  * speed_factor
+	# Apply tuning: aileron effectiveness scales roll authority; inertia scale
+	# damps all rotational response (higher inertia = slower rotation).
+	var speed_factor := clampf(airspeed / 10.0, 0.0, 1.0) / inertia_scale
+	_kin_ang_vel.x = aileron  * roll_rate_max  * speed_factor * aileron_effect
 	_kin_ang_vel.z = elevator * pitch_rate_max * speed_factor
 	_kin_ang_vel.y = rudder   * yaw_rate_max   * speed_factor
 

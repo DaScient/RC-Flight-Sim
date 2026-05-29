@@ -8,6 +8,7 @@
 
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/core/binder_common.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
 
 #ifdef HAS_JSBSIM
 #include <FGFDMExec.h>
@@ -40,6 +41,11 @@ public:
 
     /// Get a named JSBSim property value.
     double get_property(const String& p_name);
+
+    /// Return a curated snapshot of the JSBSim property tree as a Dictionary
+    /// mapping property path (String) -> value (double). Used to drive the
+    /// in-game telemetry/HUD overlay without hard-coding individual getters.
+    Dictionary get_property_tree();
 
     /// Advance simulation by p_delta seconds.
     void   update(double p_delta);

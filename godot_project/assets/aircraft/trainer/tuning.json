@@ -1,0 +1,14 @@
+{
+  "_comment": "Optional per-aircraft tuning overrides. Deep-merged over trainer.json at load time by fdm_interface.gd. Delete keys you don't want to override. See docs/refinement_guide.md.",
+
+  "engine_power_factor": 1.0,
+  "drag_multiplier": 1.0,
+  "aileron_effectiveness": 1.0,
+  "mass_factor": 1.0,
+  "inertia_scale": 1.0,
+
+  "expo": 0.25,
+  "aileron_rate": 0.8,
+  "elevator_rate": 0.75,
+  "rudder_rate": 0.6
+}

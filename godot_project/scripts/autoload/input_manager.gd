@@ -211,6 +211,49 @@ func set_calibration_value(channel: String, param: String, value) -> void:
 		_cal[param] = {}
 	_cal[param][channel] = value
 
+## Export the active device's calibration as a portable `.rcprofile` JSON file
+## (Part 2C). Returns true on success. The file can be shared between users.
+func export_profile(path: String, profile_name: String = "") -> bool:
+	var doc := {
+		"format": "rcprofile",
+		"version": 1,
+		"name": profile_name if profile_name != "" else _active_guid_name(),
+		"guid": Input.get_joy_guid(active_device) if active_device >= 0 else "",
+		"calibration": _cal,
+	}
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f == null:
+		push_error("[InputManager] Cannot write profile: %s" % path)
+		return false
+	f.store_string(JSON.stringify(doc, "\t"))
+	f.close()
+	return true
+
+## Import a `.rcprofile` JSON file and apply it to the active device, also
+## persisting it to the per-GUID profile store. Returns true on success.
+func import_profile(path: String) -> bool:
+	var err_out: Array = [""]
+	var doc := ConfigLoader.load_json_file(path, err_out)
+	if doc.is_empty():
+		push_error("[InputManager] Failed to import profile '%s': %s" % [path, err_out[0]])
+		return false
+	if String(doc.get("format", "")) != "rcprofile":
+		push_error("[InputManager] Not an rcprofile file: %s" % path)
+		return false
+	var cal: Variant = doc.get("calibration", {})
+	if typeof(cal) != TYPE_DICTIONARY:
+		push_error("[InputManager] rcprofile missing 'calibration' object.")
+		return false
+	_cal = (cal as Dictionary).duplicate(true)
+	if active_device >= 0:
+		var guid := Input.get_joy_guid(active_device)
+		_profiles[guid] = _cal.duplicate(true)
+	calibration_changed.emit()
+	return true
+
+func _active_guid_name() -> String:
+	return Input.get_joy_name(active_device) if active_device >= 0 else "Default"
+
 ## Expose raw joystick axis value for calibration UI
 func get_raw_axis(device_id: int, axis: int) -> float:
 	return Input.get_joy_axis(device_id, axis)

@@ -34,6 +34,44 @@ const MSAA_VALUES := {
 	PRESET_ULTRA:  8,  # 8x
 }
 
+# Fine-grained per-preset detail (Part 1E). Consumed by the renderer/sky/FX
+# systems via get_preset_detail(); kept declarative so adding a preset or a
+# tunable is a one-line change.
+const PRESET_DETAILS := {
+	PRESET_LOW: {
+		"shadow_cascades":      1,
+		"reflection_interval":  0,      # 0 = never update probes after first bake
+		"particle_density":     0.25,
+		"cloud_quality":        "off",
+		"render_scale":         0.75,
+		"detail_maps":          false,
+	},
+	PRESET_MEDIUM: {
+		"shadow_cascades":      2,
+		"reflection_interval":  4,
+		"particle_density":     0.5,
+		"cloud_quality":        "low",
+		"render_scale":         1.0,
+		"detail_maps":          true,
+	},
+	PRESET_HIGH: {
+		"shadow_cascades":      4,
+		"reflection_interval":  2,
+		"particle_density":     1.0,
+		"cloud_quality":        "medium",
+		"render_scale":         1.0,
+		"detail_maps":          true,
+	},
+	PRESET_ULTRA: {
+		"shadow_cascades":      4,
+		"reflection_interval":  1,
+		"particle_density":     1.5,
+		"cloud_quality":        "high",
+		"render_scale":         1.0,
+		"detail_maps":          true,
+	},
+}
+
 # ---------------------------------------------------------------------------
 # Default settings
 # ---------------------------------------------------------------------------
@@ -52,6 +90,18 @@ var _defaults: Dictionary = {
 	"camera_mode":       "chase",
 	"show_hud":          true,
 	"language":          "en",
+
+	# Telemetry (UDP stream – see docs/telemetry_protocol.md)
+	"telemetry_enabled": false,
+	"telemetry_host":    "127.0.0.1",
+	"telemetry_port":    9001,
+	"telemetry_rate_hz": 20.0,
+
+	# Expanded graphics detail (per-preset overrides applied on top of preset)
+	"cloud_quality":     "medium",   # off | low | medium | high
+	"particle_density":  1.0,        # 0..1 multiplier for FX particle counts
+	"render_scale":      1.0,        # 0.5..2.0 (web/perf scaling)
+	"cinematic_mode":    false,      # DoF + film grain toggle
 }
 
 var _settings: Dictionary = {}
@@ -101,7 +151,21 @@ func apply_graphics_preset(preset: String) -> void:
 	var post_proc: bool = preset in [PRESET_HIGH, PRESET_ULTRA]
 	set_setting("post_processing", post_proc)
 
+	# Apply fine-grained detail derived from the preset (Part 1E).
+	var detail: Dictionary = PRESET_DETAILS.get(preset, PRESET_DETAILS[PRESET_MEDIUM])
+	set_setting("particle_density", detail["particle_density"])
+	set_setting("cloud_quality", detail["cloud_quality"])
+	set_setting("render_scale", detail["render_scale"])
+	var cascades: int = detail["shadow_cascades"]
+	RenderingServer.directional_shadow_atlas_set_size(shadow_size, cascades > 1)
+
 	preset_changed.emit(preset)
+
+## Return the fine-grained detail Dictionary for a preset (or the active one).
+## Renderer, sky and FX systems read this to size their workloads.
+func get_preset_detail(preset: String = "") -> Dictionary:
+	var key := preset if preset != "" else String(get_setting("graphics_preset", PRESET_MEDIUM))
+	return (PRESET_DETAILS.get(key, PRESET_DETAILS[PRESET_MEDIUM]) as Dictionary).duplicate()
 
 # ---------------------------------------------------------------------------
 # Internal helpers
