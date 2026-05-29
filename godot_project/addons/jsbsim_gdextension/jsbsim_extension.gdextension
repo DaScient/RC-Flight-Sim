@@ -1,0 +1,14 @@
+[configuration]
+entry_symbol = "jsbsim_init"
+compatibility_minimum = "4.2"
+reloadable = false
+
+[libraries]
+windows.debug.x86_64    = "res://bin/jsbsim_gdextension.dll"
+windows.release.x86_64  = "res://bin/jsbsim_gdextension.dll"
+linux.debug.x86_64      = "res://bin/jsbsim_gdextension.so"
+linux.release.x86_64    = "res://bin/jsbsim_gdextension.so"
+macos.debug             = "res://bin/jsbsim_gdextension.dylib"
+macos.release           = "res://bin/jsbsim_gdextension.dylib"
+android.debug.arm64     = "res://bin/jsbsim_gdextension.arm64-v8a.so"
+android.release.arm64   = "res://bin/jsbsim_gdextension.arm64-v8a.so"

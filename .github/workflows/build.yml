@@ -1,0 +1,173 @@
+name: Build & Export RC-Flight-Sim
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: "4.2.2"
+  EXPORT_NAME:   "RC-Flight-Sim"
+  PROJECT_PATH:  "godot_project"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build the JSBSim GDExtension (stub / kinematic mode, no JSBSim deps)
+  # ---------------------------------------------------------------------------
+  build-extension:
+    name: Build GDExtension (${{ matrix.os }})
+    permissions:
+      contents: read
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            lib_suffix: .so
+            cmake_extra: ""
+          - os: windows-2022
+            lib_suffix: .dll
+            cmake_extra: ""
+          - os: macos-13
+            lib_suffix: .dylib
+            cmake_extra: "-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup godot-cpp submodule
+        run: git submodule update --init -- godot-cpp || true
+
+      - name: Cache CMake build
+        uses: actions/cache@v4
+        with:
+          path: godot_project/addons/jsbsim_gdextension/build
+          key: ${{ runner.os }}-cmake-${{ hashFiles('godot_project/addons/jsbsim_gdextension/**') }}
+
+      - name: Configure CMake (stub – no JSBSim)
+        run: |
+          cmake -B godot_project/addons/jsbsim_gdextension/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DJSBSIM_ENABLED=OFF \
+            -DGODOT_CPP_DIR=${{ github.workspace }}/godot-cpp \
+            ${{ matrix.cmake_extra }} \
+            godot_project/addons/jsbsim_gdextension
+        shell: bash
+
+      - name: Build
+        run: cmake --build godot_project/addons/jsbsim_gdextension/build --config Release -j4
+        shell: bash
+
+      - name: Upload extension binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-${{ runner.os }}
+          path: godot_project/bin/jsbsim_gdextension${{ matrix.lib_suffix }}
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # Export Godot project for all platforms
+  # ---------------------------------------------------------------------------
+  export:
+    name: Export (${{ matrix.platform }})
+    permissions:
+      contents: read
+    runs-on: ubuntu-22.04
+    needs: build-extension
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: Windows
+            export_preset: "Windows Desktop"
+            output_dir:    "build/windows"
+            output_file:   "RC-Flight-Sim.exe"
+          - name: Linux
+            export_preset: "Linux/X11"
+            output_dir:    "build/linux"
+            output_file:   "RC-Flight-Sim.x86_64"
+          - name: macOS
+            export_preset: "macOS"
+            output_dir:    "build/macos"
+            output_file:   "RC-Flight-Sim.zip"
+          - name: Android
+            export_preset: "Android"
+            output_dir:    "build/android"
+            output_file:   "RC-Flight-Sim.apk"
+          - name: Web
+            export_preset: "Web"
+            output_dir:    "build/web"
+            output_file:   "RC-Flight-Sim.html"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download extension binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: extension-*
+          path: godot_project/bin/
+          merge-multiple: true
+
+      - name: Setup Godot ${{ env.GODOT_VERSION }}
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          use-dotnet: false
+          include-templates: true
+
+      - name: Create output directory
+        run: mkdir -p ${{ matrix.platform.output_dir }}
+
+      - name: Export (${{ matrix.platform.name }})
+        run: |
+          godot --headless \
+            --path ${{ env.PROJECT_PATH }} \
+            --export-release "${{ matrix.platform.export_preset }}" \
+            "${{ github.workspace }}/${{ matrix.platform.output_dir }}/${{ matrix.platform.output_file }}"
+
+      - name: Upload ${{ matrix.platform.name }} build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.EXPORT_NAME }}-${{ matrix.platform.name }}
+          path: ${{ matrix.platform.output_dir }}/
+
+  # ---------------------------------------------------------------------------
+  # Create a GitHub Release on version tags
+  # ---------------------------------------------------------------------------
+  release:
+    name: Create Release
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04
+    needs: export
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ env.EXPORT_NAME }}-*
+          path: release/
+
+      - name: Zip each platform build
+        run: |
+          cd release
+          for dir in */; do
+            zip -r "${dir%/}.zip" "$dir"
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

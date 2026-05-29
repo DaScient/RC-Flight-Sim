@@ -1,0 +1,42 @@
+{
+  "_comment": "3D aerobatic model with extreme control throws and high thrust-to-weight ratio.",
+  "name":           "3D Aerobat",
+  "id":             "aerobat",
+  "jsbsim_xml":     "res://assets/aircraft/aerobat/aerobat_fdm.xml",
+
+  "mass_kg":        0.9,
+  "wingspan_m":     1.0,
+  "wing_area_m2":   0.18,
+  "aspect_ratio":   5.6,
+  "oswald":         0.75,
+
+  "cl0":            0.20,
+  "cl_alpha":       4.8,
+  "cd0":            0.045,
+
+  "max_thrust_n":   20.0,
+  "max_rpm":        12000,
+
+  "max_roll_rate_dps":  720.0,
+  "max_pitch_rate_dps": 360.0,
+  "max_yaw_rate_dps":   180.0,
+
+  "aileron_rate":   1.0,
+  "elevator_rate":  1.0,
+  "rudder_rate":    1.0,
+  "expo":           0.35,
+
+  "stall_speed_ms": 4.5,
+  "cruise_speed_ms": 12.0,
+  "max_speed_ms":   28.0,
+
+  "engine_type":    "electric_brushless",
+  "battery_cells":  4,
+  "motor_kv":       1200,
+
+  "sounds": {
+    "motor":        "res://assets/audio/motor_electric_high.ogg"
+  },
+
+  "model_scene":    "res://scenes/aircraft/aerobat.tscn"
+}

@@ -1,0 +1,42 @@
+{
+  "_comment": "High-wing electric trainer – beginner-friendly with forgiving flight characteristics.",
+  "name":           "Electric Trainer",
+  "id":             "trainer",
+  "jsbsim_xml":     "res://assets/aircraft/trainer/trainer_fdm.xml",
+
+  "mass_kg":        1.5,
+  "wingspan_m":     1.4,
+  "wing_area_m2":   0.27,
+  "aspect_ratio":   7.3,
+  "oswald":         0.82,
+
+  "cl0":            0.35,
+  "cl_alpha":       5.1,
+  "cd0":            0.032,
+
+  "max_thrust_n":   18.0,
+  "max_rpm":        9500,
+
+  "max_roll_rate_dps":  150.0,
+  "max_pitch_rate_dps":  70.0,
+  "max_yaw_rate_dps":    45.0,
+
+  "aileron_rate":   0.8,
+  "elevator_rate":  0.75,
+  "rudder_rate":    0.6,
+  "expo":           0.25,
+
+  "stall_speed_ms": 6.5,
+  "cruise_speed_ms": 14.0,
+  "max_speed_ms":   22.0,
+
+  "engine_type":    "electric_brushless",
+  "battery_cells":  3,
+  "motor_kv":       1000,
+
+  "sounds": {
+    "motor":        "res://assets/audio/motor_electric.ogg"
+  },
+
+  "model_scene":    "res://scenes/aircraft/trainer.tscn"
+}
