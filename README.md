@@ -1,4 +1,5 @@
-# RC-Flight-Sim
+# RC Flight Sim
+## DaScient, Inc. | 2026
 
 > **Free, open-source, community-driven RC flight simulator built with Godot 4.**
 
