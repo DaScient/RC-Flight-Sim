@@ -1,37 +1,25 @@
-[gd_scene load_steps=6 format=3 uid="uid://dmain0000000000001"]
+[gd_scene format=3 uid="uid://pf21h077vgai"]
 
-[ext_resource type="Script" path="res://scripts/flight_sim/aircraft_node.gd" id="1_aircraft_script"]
-[ext_resource type="Script" path="res://scripts/flight_sim/fdm_interface.gd" id="2_fdm_script"]
+[ext_resource type="Script" uid="uid://ddbngp4ohlqc0" path="res://scripts/flight_sim/aircraft_node.gd" id="1_aircraft_script"]
+[ext_resource type="Script" uid="uid://dbxna54flrhtq" path="res://scripts/flight_sim/fdm_interface.gd" id="2_fdm_script"]
+[ext_resource type="Material" path="res://assets/materials/paper.tres" id="3_sugp2"]
 
-[sub_resource type="ProceduralSkyMaterial" id="sky_mat"]
-sky_top_color = Color(0.38, 0.5, 0.78, 1)
-sky_horizon_color = Color(0.65, 0.78, 0.92, 1)
+[node name="Main" type="Node3D" unique_id=651243935]
 
-[sub_resource type="BoxMesh" id="box_mesh"]
-size = Vector3(1.5, 0.2, 0.8)
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=460061785]
 
-[sub_resource type="StandardMaterial3D" id="plane_material"]
-albedo_color = Color(0.8, 0.2, 0.2, 1)
-
-[node name="Main" type="Node3D"]
-
-[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
-environment = SubResource("sky_mat")
-
-[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=686093538]
 transform = Transform3D(1, 0, 0, 0, 0.866025, 0.5, 0, -0.5, 0.866025, 0, 10, 0)
 
-[node name="Camera3D" type="Camera3D" parent="."]
+[node name="Camera3D" type="Camera3D" parent="." unique_id=1221388760]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 5)
 current = true
 
-[node name="Aircraft" type="Node3D" parent="."]
+[node name="Aircraft" type="Node3D" parent="." unique_id=1006636286]
 script = ExtResource("1_aircraft_script")
-aircraft_config_path = "res://assets/aircraft/trainer/trainer.json"
 
-[node name="FDMInterface" type="Node" parent="Aircraft"]
+[node name="FDMInterface" type="Node" parent="Aircraft" unique_id=1143235053]
 script = ExtResource("2_fdm_script")
 
-[node name="Mesh" type="MeshInstance3D" parent="Aircraft"]
-mesh = SubResource("box_mesh")
-surface_material_override/0 = SubResource("plane_material")
+[node name="Mesh" type="MeshInstance3D" parent="Aircraft" unique_id=1221072887]
+material_override = ExtResource("3_sugp2")
