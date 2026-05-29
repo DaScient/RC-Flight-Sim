@@ -77,6 +77,7 @@ void JSBSimFDM::_bind_methods() {
     ClassDB::bind_method(D_METHOD("load_aircraft", "xml_path"),   &JSBSimFDM::load_aircraft);
     ClassDB::bind_method(D_METHOD("set_property",  "name", "value"), &JSBSimFDM::set_property);
     ClassDB::bind_method(D_METHOD("get_property",  "name"),       &JSBSimFDM::get_property);
+    ClassDB::bind_method(D_METHOD("get_property_tree"),           &JSBSimFDM::get_property_tree);
     ClassDB::bind_method(D_METHOD("update",        "delta"),      &JSBSimFDM::update);
     ClassDB::bind_method(D_METHOD("reset"),                       &JSBSimFDM::reset);
     ClassDB::bind_method(D_METHOD("set_root_path", "path"),       &JSBSimFDM::set_root_path);
@@ -118,6 +119,45 @@ double JSBSimFDM::get_property(const String& p_name) {
 #else
     return 0.0;
 #endif
+}
+
+Dictionary JSBSimFDM::get_property_tree() {
+    Dictionary out;
+#ifdef HAS_JSBSIM
+    if (!_fdm_exec || !_is_loaded) return out;
+
+    // Curated set of high-value properties for the telemetry/HUD overlay.
+    // NOTE: JSBSim exposes a full FGPropertyManager tree; enumerating every
+    // node is possible via FGPropertyNode recursion. We expose a stable,
+    // documented subset here for performance and a clear UI contract.
+    // TODO: add optional full-tree recursion behind a flag for research use.
+    static const char* kPaths[] = {
+        "velocities/vt-fps",
+        "velocities/mach",
+        "position/h-sl-ft",
+        "position/h-agl-ft",
+        "aero/alpha-deg",
+        "aero/beta-deg",
+        "aero/qbar-psf",
+        "forces/fbx-aero-lbs",
+        "forces/fbz-aero-lbs",
+        "moments/m-aero-lbsft",
+        "aero/cl-squared",
+        "propulsion/engine/thrust-lbs",
+        "propulsion/engine/rpm",
+        "fcs/throttle-cmd-norm",
+        "fcs/aileron-cmd-norm",
+        "fcs/elevator-cmd-norm",
+        "fcs/rudder-cmd-norm",
+        "attitude/roll-rad",
+        "attitude/pitch-rad",
+        "attitude/psi-rad",
+    };
+    for (const char* path : kPaths) {
+        out[String(path)] = _fdm_exec->GetPropertyValue(path);
+    }
+#endif
+    return out;
 }
 
 void JSBSimFDM::update(double p_delta) {

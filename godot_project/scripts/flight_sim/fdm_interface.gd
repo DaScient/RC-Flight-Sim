@@ -96,6 +96,38 @@ func get_state() -> Dictionary:
 func get_controls() -> Dictionary:
 	return _controls.duplicate()
 
+## Return a property-tree snapshot for the telemetry/HUD overlay (Part 3A).
+## With the JSBSim backend this is the native curated property tree; with the
+## kinematic fallback it is synthesised from the current state so the overlay
+## works in both modes.
+func get_property_tree() -> Dictionary:
+	if backend == FDMBackend.JSBSIM and _jsbsim_node != null and _jsbsim_node.has_method("get_property_tree"):
+		return _jsbsim_node.get_property_tree()
+	return {
+		"velocities/vt-mps":       state.get("airspeed_ms", 0.0),
+		"position/h-agl-m":        state.get("altitude_m", 0.0),
+		"aero/alpha-deg":          state.get("aoa_deg", 0.0),
+		"propulsion/engine/rpm":   state.get("engine_rpm", 0.0),
+		"fcs/throttle-cmd-norm":   _controls[SURFACE_THROTTLE],
+		"fcs/aileron-cmd-norm":    _controls[SURFACE_AILERON],
+		"fcs/elevator-cmd-norm":   _controls[SURFACE_ELEVATOR],
+		"fcs/rudder-cmd-norm":     _controls[SURFACE_RUDDER],
+	}
+
+## Set an arbitrary simulation property at runtime (used by the sim console,
+## Part 3A). With JSBSim this writes to the native property tree; with the
+## kinematic backend it maps the common fcs/* control paths onto the controls.
+func set_property(path: String, value: float) -> bool:
+	if backend == FDMBackend.JSBSIM and _jsbsim_node != null and _jsbsim_node.has_method("set_property"):
+		_jsbsim_node.set_property(path, value)
+		return true
+	match path:
+		"fcs/aileron-cmd-norm":  set_control_surface(SURFACE_AILERON, value); return true
+		"fcs/elevator-cmd-norm": set_control_surface(SURFACE_ELEVATOR, value); return true
+		"fcs/rudder-cmd-norm":   set_control_surface(SURFACE_RUDDER, value); return true
+		"fcs/throttle-cmd-norm": set_control_surface(SURFACE_THROTTLE, value); return true
+	return false
+
 ## Load aircraft definition and initialize FDM.
 func load_aircraft(config_path: String) -> void:
 	var f := FileAccess.open(config_path, FileAccess.READ)

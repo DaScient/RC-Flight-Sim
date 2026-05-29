@@ -19,6 +19,7 @@ func _initialize() -> void:
 	var suites: Array = [
 		TestMathUtils,
 		TestConfigParser,
+		TestSimConsole,
 	]
 	for suite_class in suites:
 		var suite: Object = suite_class.new()
