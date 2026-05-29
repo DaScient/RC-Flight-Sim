@@ -141,10 +141,40 @@ func load_aircraft(config_path: String) -> void:
 		push_error("[FDMInterface] JSON parse error in %s: %s" % [config_path, json.get_error_message()])
 		return
 	aircraft_config = json.get_data()
+
+	# Apply optional tuning.json overrides located next to the aircraft config
+	# (Part 2B). This lets advanced users retune mass, control effectiveness,
+	# drag, engine power, etc. without editing the base definition or XML.
+	_apply_tuning_overrides(config_path)
+
 	if backend == FDMBackend.JSBSIM and _jsbsim_node != null:
 		var xml_path: String = aircraft_config.get("jsbsim_xml", "")
 		if xml_path != "":
 			_jsbsim_node.load_aircraft(xml_path)
+		_apply_tuning_to_jsbsim()
+
+## Merge a sibling `tuning.json` (if present) over the loaded aircraft config.
+func _apply_tuning_overrides(config_path: String) -> void:
+	var tuning_path := config_path.get_base_dir().path_join("tuning.json")
+	if not FileAccess.file_exists(tuning_path):
+		return
+	var err_out: Array = [""]
+	var tuning := ConfigLoader.load_json_file(tuning_path, err_out)
+	if tuning.is_empty():
+		if String(err_out[0]) != "":
+			push_warning("[FDMInterface] Ignoring tuning.json: %s" % err_out[0])
+		return
+	aircraft_config = ConfigLoader.deep_merge(aircraft_config, tuning)
+	print("[FDMInterface] Applied tuning overrides from %s" % tuning_path)
+
+## Push tuning multipliers that have direct JSBSim analogues into the FDM.
+func _apply_tuning_to_jsbsim() -> void:
+	if _jsbsim_node == null:
+		return
+	# Common, safe property-tree scalings. Missing keys default to 1.0 (no-op).
+	var power: float = ConfigLoader.get_number(aircraft_config, "engine_power_factor", 1.0, 0.0, 10.0)
+	if not is_equal_approx(power, 1.0):
+		_jsbsim_node.set_property("propulsion/engine/power-hp-factor", power)
 
 ## Step the FDM by delta seconds (called from AircraftNode._physics_process).
 func update_fdm(delta: float, transform: Transform3D) -> void:
@@ -201,6 +231,14 @@ func _step_kinematic(delta: float, transform: Transform3D) -> void:
 	var max_rpm: float  = cfg.get("max_rpm", 10000.0)
 	var thrust_n: float = cfg.get("max_thrust_n", 15.0)
 
+	# Tuning multipliers (Part 2B). Default 1.0 = no change.
+	var power_factor: float    = ConfigLoader.get_number(cfg, "engine_power_factor", 1.0, 0.0, 10.0)
+	var drag_mult: float       = ConfigLoader.get_number(cfg, "drag_multiplier", 1.0, 0.0, 10.0)
+	var aileron_effect: float  = ConfigLoader.get_number(cfg, "aileron_effectiveness", 1.0, 0.0, 10.0)
+	var inertia_scale: float   = ConfigLoader.get_number(cfg, "inertia_scale", 1.0, 0.01, 100.0)
+	mass *= ConfigLoader.get_number(cfg, "mass_factor", 1.0, 0.01, 100.0)
+	thrust_n *= power_factor
+
 	var throttle: float  = _controls[SURFACE_THROTTLE]
 	var aileron: float   = _controls[SURFACE_AILERON]
 	var elevator: float  = _controls[SURFACE_ELEVATOR]
@@ -229,7 +267,7 @@ func _step_kinematic(delta: float, transform: Transform3D) -> void:
 	cl = clampf(cl, -1.5, 1.5)
 	var cd := cd0 + (cl * cl) / (PI * float(cfg.get("aspect_ratio", 5.8)) * float(cfg.get("oswald", 0.8)))
 	var lift_n := q * wing_area * cl
-	var drag_n := q * wing_area * cd
+	var drag_n := q * wing_area * cd * drag_mult
 
 	# Lift acts perpendicular to velocity in the lift plane; drag opposes velocity
 	var lift_dir := transform.basis.y  # approximation: vertical in body frame
@@ -272,8 +310,10 @@ func _step_kinematic(delta: float, transform: Transform3D) -> void:
 	var pitch_rate_max := deg_to_rad(cfg.get("max_pitch_rate_dps",  90.0))
 	var yaw_rate_max   := deg_to_rad(cfg.get("max_yaw_rate_dps",    60.0))
 
-	var speed_factor := clampf(airspeed / 10.0, 0.0, 1.0)
-	_kin_ang_vel.x = aileron  * roll_rate_max  * speed_factor
+	# Apply tuning: aileron effectiveness scales roll authority; inertia scale
+	# damps all rotational response (higher inertia = slower rotation).
+	var speed_factor := clampf(airspeed / 10.0, 0.0, 1.0) / inertia_scale
+	_kin_ang_vel.x = aileron  * roll_rate_max  * speed_factor * aileron_effect
 	_kin_ang_vel.z = elevator * pitch_rate_max * speed_factor
 	_kin_ang_vel.y = rudder   * yaw_rate_max   * speed_factor
 
