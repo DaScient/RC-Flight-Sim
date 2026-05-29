@@ -24,6 +24,7 @@ keyboard, and touch controls – out of the box, with no special drivers require
 | **Cameras** | FPV, Chase (spring-arm), Stationary (pilot box), Tower, Free Orbit |
 | **Rendering** | GL Compatibility (low-end) → Forward+ Vulkan (high-end); dynamic shadows, post-FX |
 | **Extensible** | Hot-loadable aircraft and sceneries; community Aircraft/Scenery Developer Kit |
+| **Agentic AI** | Opt-in [Experimental Agentic Mode](docs/agentic_mode.md): BYO-key LLM flight instructor, AI co-pilot, scenario generator & debrief |
 | **Platforms** | Windows, Linux, macOS, Android, Web |
 
 ---
