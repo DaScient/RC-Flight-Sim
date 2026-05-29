@@ -99,6 +99,11 @@ func load_profile(path: String) -> bool:
 	load_from_scenario(data)
 	return true
 
+## Set the surface (sea-level) wind vector directly. Used by the
+## WeatherController so live weather changes drive the physics wind model.
+func set_surface_wind(v: Vector3) -> void:
+	wind_velocity = v
+
 ## Get effective wind at a given altitude (m above sea level)
 func get_wind_at_altitude(altitude_m: float) -> Vector3:
 	var base_wind: Vector3

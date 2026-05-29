@@ -1,0 +1,19 @@
+[gd_resource type="ShaderMaterial" load_steps=2 format=3]
+
+; standard_flight_material.tres
+; Master PBR material shared by all aircraft (Part 1A). Assign per-aircraft
+; albedo/metallic/roughness/normal/AO/livery textures by duplicating this
+; resource. Set `detail_enabled = false` (done automatically by the Low
+; graphics preset) to skip normal/AO/decal sampling.
+
+[ext_resource type="Shader" path="res://shaders/aircraft_pbr.gdshader" id="1"]
+
+[resource]
+shader = ExtResource("1")
+shader_parameter/albedo_tint = Color(1, 1, 1, 1)
+shader_parameter/metallic_factor = 0.2
+shader_parameter/roughness_factor = 0.6
+shader_parameter/normal_scale = 1.0
+shader_parameter/ao_strength = 1.0
+shader_parameter/livery_enabled = false
+shader_parameter/detail_enabled = true
