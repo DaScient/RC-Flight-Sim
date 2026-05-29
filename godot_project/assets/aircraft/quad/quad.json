@@ -1,0 +1,45 @@
+{
+  "_comment": "5-inch freestyle FPV quadcopter – self-levelling (angle mode) multirotor handled by the built-in kinematic drone model. No JSBSim XML required.",
+  "name":           "FPV Quadcopter",
+  "id":             "quad",
+  "vehicle_type":   "multirotor",
+
+  "mass_kg":        0.55,
+  "motor_count":    4,
+  "arm_length_m":   0.115,
+  "thrust_to_weight": 4.0,
+  "yaw_torque_coef": 0.018,
+
+  "inertia_roll":   0.0045,
+  "inertia_pitch":  0.0045,
+  "inertia_yaw":    0.0085,
+  "angular_damping": 2.5,
+
+  "drag_area_m2":   0.045,
+
+  "max_bank_deg":   45.0,
+  "max_yaw_rate_dps": 250.0,
+  "max_rpm":        28000,
+
+  "pid_attitude_kp": 0.20,
+  "pid_attitude_ki": 0.02,
+  "pid_attitude_kd": 0.014,
+  "pid_yaw_kp":     0.10,
+  "pid_yaw_ki":     0.0,
+  "pid_yaw_kd":     0.0,
+
+  "aileron_rate":   1.0,
+  "elevator_rate":  1.0,
+  "rudder_rate":    1.0,
+  "expo":           0.2,
+
+  "engine_type":    "electric_brushless",
+  "battery_cells":  4,
+  "motor_kv":       2400,
+
+  "sounds": {
+    "motor":        "res://assets/audio/motor_electric.ogg"
+  },
+
+  "model_scene":    "res://scenes/aircraft/trainer.tscn"
+}

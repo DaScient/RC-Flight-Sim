@@ -62,6 +62,11 @@ var _controls: Dictionary = {
 # ---------------------------------------------------------------------------
 var aircraft_config: Dictionary = {}
 
+## Kinematic vehicle model selector. "fixed_wing" (default) uses the classic
+## lift/drag aeroplane model; "multirotor" uses the self-levelling drone model.
+## Read from aircraft_config["vehicle_type"] in load_aircraft().
+var _vehicle_type: String = "fixed_wing"
+
 # ---------------------------------------------------------------------------
 # Lifecycle
 # ---------------------------------------------------------------------------
@@ -142,6 +147,10 @@ func load_aircraft(config_path: String) -> void:
 		return
 	aircraft_config = json.get_data()
 
+	# Select the kinematic flight model (fixed-wing vs multirotor). The string
+	# is normalised so "quadcopter"/"drone"/"multi-rotor" all map to multirotor.
+	_vehicle_type = _normalise_vehicle_type(String(aircraft_config.get("vehicle_type", "fixed_wing")))
+
 	# Apply optional tuning.json overrides located next to the aircraft config
 	# (Part 2B). This lets advanced users retune mass, control effectiveness,
 	# drag, engine power, etc. without editing the base definition or XML.
@@ -181,6 +190,8 @@ func update_fdm(delta: float, transform: Transform3D) -> void:
 	if backend == FDMBackend.JSBSIM and _jsbsim_node != null:
 		_jsbsim_node.update(delta)
 		_read_jsbsim_state()
+	elif _vehicle_type == "multirotor":
+		_step_multirotor(delta, transform)
 	else:
 		_step_kinematic(delta, transform)
 	state_updated.emit(state)
@@ -333,8 +344,155 @@ func _step_kinematic(delta: float, transform: Transform3D) -> void:
 	))
 
 # ---------------------------------------------------------------------------
+# Built-in kinematic multirotor (drone) model
+# ---------------------------------------------------------------------------
+## Self-levelling ("angle mode") multirotor model. RC sticks command a target
+## bank/pitch angle and a yaw rate; cascaded PID controllers drive a quad-X
+## motor mix (see MultirotorUtils) which produces body thrust and torque that
+## are integrated as a 6-DOF rigid body. Used when the aircraft config sets
+## "vehicle_type": "multirotor".
+var _mr_orientation: Quaternion = Quaternion.IDENTITY
+var _mr_velocity: Vector3 = Vector3.ZERO
+var _mr_ang_vel: Vector3 = Vector3.ZERO  # body rad/s, Godot axes: x=pitch, y=yaw, z=roll
+var _mr_initialised: bool = false
+# Persisted PID state (integral, prev_error) per stabilised axis.
+var _mr_pid_roll: Dictionary = {"integral": 0.0, "prev_error": 0.0}
+var _mr_pid_pitch: Dictionary = {"integral": 0.0, "prev_error": 0.0}
+var _mr_pid_yaw: Dictionary = {"integral": 0.0, "prev_error": 0.0}
+
+func _step_multirotor(delta: float, transform: Transform3D) -> void:
+	var cfg := aircraft_config
+
+	if not _mr_initialised:
+		_mr_orientation = transform.basis.get_rotation_quaternion()
+		_mr_initialised = true
+
+	# --- Vehicle parameters -------------------------------------------------
+	var mass: float = ConfigLoader.get_number(cfg, "mass_kg", 0.9, 0.001, 1000.0)
+	mass *= ConfigLoader.get_number(cfg, "mass_factor", 1.0, 0.01, 100.0)
+	var motor_count := int(ConfigLoader.get_number(cfg, "motor_count", 4.0, 1.0, 16.0))
+	var arm_m: float = ConfigLoader.get_number(cfg, "arm_length_m", 0.12, 0.001, 5.0)
+	var yaw_coef: float = ConfigLoader.get_number(cfg, "yaw_torque_coef", 0.02, 0.0, 10.0)
+	# Per-motor max thrust (N). Derived from thrust-to-weight if not given.
+	var twr: float = ConfigLoader.get_number(cfg, "thrust_to_weight", 2.0, 0.1, 20.0)
+	var default_motor_thrust := (mass * 9.81 * twr) / maxf(float(motor_count), 1.0)
+	var motor_thrust: float = ConfigLoader.get_number(cfg, "motor_thrust_n", default_motor_thrust, 0.0, 10000.0)
+	motor_thrust *= ConfigLoader.get_number(cfg, "engine_power_factor", 1.0, 0.0, 10.0)
+
+	# Moments of inertia (kg·m²) about body roll/pitch/yaw axes.
+	var inertia_scale: float = ConfigLoader.get_number(cfg, "inertia_scale", 1.0, 0.01, 100.0)
+	var i_roll: float = ConfigLoader.get_number(cfg, "inertia_roll", 0.01, 0.00001, 1000.0) * inertia_scale
+	var i_pitch: float = ConfigLoader.get_number(cfg, "inertia_pitch", 0.01, 0.00001, 1000.0) * inertia_scale
+	var i_yaw: float = ConfigLoader.get_number(cfg, "inertia_yaw", 0.02, 0.00001, 1000.0) * inertia_scale
+
+	# --- Stick commands -----------------------------------------------------
+	var throttle: float = clampf(_controls[SURFACE_THROTTLE], 0.0, 1.0)
+	var max_angle_rad := deg_to_rad(ConfigLoader.get_number(cfg, "max_bank_deg", 35.0, 1.0, 89.0))
+	var max_yaw_rate := deg_to_rad(ConfigLoader.get_number(cfg, "max_yaw_rate_dps", 180.0, 1.0, 1080.0))
+	var target_roll: float = _controls[SURFACE_AILERON] * max_angle_rad
+	var target_pitch: float = _controls[SURFACE_ELEVATOR] * max_angle_rad
+	var target_yaw_rate: float = _controls[SURFACE_RUDDER] * max_yaw_rate
+
+	# --- Current attitude ---------------------------------------------------
+	var euler := _mr_orientation.get_euler()  # x=pitch, y=yaw, z=roll (Godot)
+	var cur_roll := euler.z
+	var cur_pitch := euler.x
+
+	# --- Cascaded PID stabilisation ----------------------------------------
+	var kp_att: float = ConfigLoader.get_number(cfg, "pid_attitude_kp", 0.18, 0.0, 100.0)
+	var ki_att: float = ConfigLoader.get_number(cfg, "pid_attitude_ki", 0.02, 0.0, 100.0)
+	var kd_att: float = ConfigLoader.get_number(cfg, "pid_attitude_kd", 0.012, 0.0, 100.0)
+	var kp_yaw: float = ConfigLoader.get_number(cfg, "pid_yaw_kp", 0.08, 0.0, 100.0)
+	var ki_yaw: float = ConfigLoader.get_number(cfg, "pid_yaw_ki", 0.0, 0.0, 100.0)
+	var kd_yaw: float = ConfigLoader.get_number(cfg, "pid_yaw_kd", 0.0, 0.0, 100.0)
+
+	_mr_pid_roll = MultirotorUtils.pid_step(target_roll - cur_roll,
+		_mr_pid_roll["prev_error"], _mr_pid_roll["integral"], kp_att, ki_att, kd_att, delta)
+	_mr_pid_pitch = MultirotorUtils.pid_step(target_pitch - cur_pitch,
+		_mr_pid_pitch["prev_error"], _mr_pid_pitch["integral"], kp_att, ki_att, kd_att, delta)
+	_mr_pid_yaw = MultirotorUtils.pid_step(target_yaw_rate - _mr_ang_vel.y,
+		_mr_pid_yaw["prev_error"], _mr_pid_yaw["integral"], kp_yaw, ki_yaw, kd_yaw, delta)
+
+	var roll_cmd := clampf(_mr_pid_roll["output"], -1.0, 1.0)
+	var pitch_cmd := clampf(_mr_pid_pitch["output"], -1.0, 1.0)
+	var yaw_cmd := clampf(_mr_pid_yaw["output"], -1.0, 1.0)
+
+	# --- Motor mix → thrust & torque ---------------------------------------
+	var motors := MultirotorUtils.mix_quad_x(throttle, roll_cmd, pitch_cmd, yaw_cmd)
+	var thrust_n := MultirotorUtils.total_thrust(motors, motor_thrust)
+	var torque := MultirotorUtils.motors_to_body_torque(motors, arm_m, motor_thrust, yaw_coef)
+
+	# --- Angular dynamics ---------------------------------------------------
+	# torque is (roll, pitch, yaw); map onto Godot body axes X=pitch, Y=yaw, Z=roll.
+	var ang_accel := Vector3(torque.y / i_pitch, torque.z / i_yaw, torque.x / i_roll)
+	# Light rotational damping models rotor/air drag and keeps the sim stable.
+	var ang_damp: float = ConfigLoader.get_number(cfg, "angular_damping", 2.5, 0.0, 100.0)
+	_mr_ang_vel += ang_accel * delta
+	_mr_ang_vel -= _mr_ang_vel * clampf(ang_damp * delta, 0.0, 1.0)
+
+	# Integrate orientation from body angular velocity.
+	var spin := _mr_ang_vel * delta
+	if spin.length() > 0.0000001:
+		_mr_orientation = (_mr_orientation * Quaternion(spin.normalized(), spin.length())).normalized()
+
+	# --- Linear dynamics ----------------------------------------------------
+	var basis := Basis(_mr_orientation)
+	var thrust_force := basis.y * thrust_n
+	var gravity := Vector3(0.0, -9.81 * mass, 0.0)
+
+	# Translational aerodynamic drag relative to the wind.
+	var wind := Atmosphere.get_wind_at_altitude(transform.origin.y)
+	var vel_rel := _mr_velocity - wind
+	var rho := Atmosphere.get_density_at_altitude(transform.origin.y)
+	var drag_area: float = ConfigLoader.get_number(cfg, "drag_area_m2", 0.05, 0.0, 100.0)
+	drag_area *= ConfigLoader.get_number(cfg, "drag_multiplier", 1.0, 0.0, 10.0)
+	var drag_force := Vector3.ZERO
+	var speed := vel_rel.length()
+	if speed > 0.001:
+		drag_force = -vel_rel.normalized() * (0.5 * rho * speed * speed * drag_area)
+
+	var total_force := thrust_force + gravity + drag_force
+	var accel := total_force / mass
+
+	# --- Ground handling ----------------------------------------------------
+	var new_velocity := _mr_velocity + accel * delta
+	var new_position := transform.origin + new_velocity * delta
+	var ground_y := 0.0
+	var on_ground := false
+	if new_position.y <= ground_y + 0.05:
+		on_ground = true
+		new_position.y = ground_y + 0.05
+		if new_velocity.y < 0.0:
+			new_velocity.y = 0.0
+		# Ground friction bleeds horizontal speed when resting on the surface.
+		new_velocity.x = move_toward(new_velocity.x, 0.0, delta * 4.0)
+		new_velocity.z = move_toward(new_velocity.z, 0.0, delta * 4.0)
+	_mr_velocity = new_velocity
+
+	# --- Publish state ------------------------------------------------------
+	state["position"] = new_position
+	state["velocity"] = _mr_velocity
+	state["angular_velocity"] = _mr_ang_vel
+	state["orientation"] = _mr_orientation
+	var pub_euler := _mr_orientation.get_euler()
+	state["euler_deg"] = Vector3(rad_to_deg(pub_euler.z), rad_to_deg(pub_euler.x), rad_to_deg(pub_euler.y))
+	state["airspeed_ms"] = speed
+	state["altitude_m"] = new_position.y
+	state["aoa_deg"] = 0.0
+	state["engine_rpm"] = ConfigLoader.get_number(cfg, "max_rpm", 25000.0) * throttle
+	state["throttle_pos"] = throttle
+	state["on_ground"] = on_ground
+
+# ---------------------------------------------------------------------------
 # Utility
 # ---------------------------------------------------------------------------
+## Normalise a free-form vehicle-type string to "multirotor" or "fixed_wing".
+func _normalise_vehicle_type(raw: String) -> String:
+	var v := raw.strip_edges().to_lower()
+	if v in ["multirotor", "multi-rotor", "multi_rotor", "quad", "quadcopter", "drone", "copter", "rotor"]:
+		return "multirotor"
+	return "fixed_wing"
+
 func _surface_to_jsbsim_prop(surface: String) -> String:
 	match surface:
 		SURFACE_AILERON:  return "fcs/aileron-cmd-norm"
