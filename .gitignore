@@ -1,0 +1,38 @@
+# Godot-specific
+.godot/
+*.uid
+*.import
+
+# Build artifacts
+bin/*.dll
+bin/*.so
+bin/*.dylib
+godot_project/addons/jsbsim_gdextension/build/
+
+# OS-specific
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# Exports
+build/
+dist/
+*.exe.meta
+
+# Python bytecode (scons)
+__pycache__/
+*.pyc
+*.pyo
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake.user

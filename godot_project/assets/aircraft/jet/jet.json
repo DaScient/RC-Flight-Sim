@@ -1,0 +1,41 @@
+{
+  "_comment": "Scale turbine jet with realistic swept-wing aerodynamics and EDF propulsion.",
+  "name":           "Scale Turbine Jet",
+  "id":             "jet",
+  "jsbsim_xml":     "res://assets/aircraft/jet/jet_fdm.xml",
+
+  "mass_kg":        2.8,
+  "wingspan_m":     1.2,
+  "wing_area_m2":   0.22,
+  "aspect_ratio":   6.5,
+  "oswald":         0.78,
+
+  "cl0":            0.15,
+  "cl_alpha":       3.8,
+  "cd0":            0.022,
+
+  "max_thrust_n":   45.0,
+  "max_rpm":        80000,
+
+  "max_roll_rate_dps":  360.0,
+  "max_pitch_rate_dps": 180.0,
+  "max_yaw_rate_dps":    90.0,
+
+  "aileron_rate":   0.85,
+  "elevator_rate":  0.70,
+  "rudder_rate":    0.55,
+  "expo":           0.40,
+
+  "stall_speed_ms": 14.0,
+  "cruise_speed_ms": 40.0,
+  "max_speed_ms":   70.0,
+
+  "engine_type":    "edf_turbine",
+  "fan_diameter_mm": 70,
+
+  "sounds": {
+    "motor":        "res://assets/audio/edf_jet.ogg"
+  },
+
+  "model_scene":    "res://scenes/aircraft/jet.tscn"
+}

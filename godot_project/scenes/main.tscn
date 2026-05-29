@@ -1,0 +1,61 @@
+[gd_scene load_steps=6 format=3 uid="uid://main_scene"]
+
+[ext_resource type="Script" path="res://scripts/flight_sim/aircraft_node.gd" id="1_aircraft_node"]
+[ext_resource type="Script" path="res://scripts/camera/camera_manager.gd" id="2_camera_manager"]
+[ext_resource type="Script" path="res://scripts/camera/chase_camera.gd" id="3_chase_cam"]
+[ext_resource type="Script" path="res://scripts/camera/fpv_camera.gd" id="4_fpv_cam"]
+[ext_resource type="Script" path="res://scripts/camera/free_orbit_camera.gd" id="5_orbit_cam"]
+[ext_resource type="Script" path="res://scripts/camera/stationary_camera.gd" id="6_stat_cam"]
+[ext_resource type="Script" path="res://scripts/camera/tower_camera.gd" id="7_tower_cam"]
+[ext_resource type="Script" path="res://scripts/flight_sim/fdm_interface.gd" id="8_fdm"]
+[ext_resource type="Script" path="res://scripts/ui/hud.gd" id="9_hud"]
+
+[node name="Main" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("environment_1")
+
+[node name="DirectionalLight" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866, -0.354, 0.354, 0, 0.707, 0.707, -0.5, -0.612, 0.612, 0, 20, 0)
+shadow_enabled = true
+directional_shadow_mode = 2
+
+[node name="Aircraft" type="Node3D" parent="." script=ExtResource("1_aircraft_node")]
+aircraft_config_path = "res://assets/aircraft/trainer/trainer.json"
+
+[node name="FDMInterface" type="Node" parent="Aircraft" script=ExtResource("8_fdm")]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Aircraft"]
+mesh = SubResource("box_mesh_1")
+
+[node name="CameraRig" type="Node3D" parent="."]
+
+[node name="CameraManager" type="Node" parent="CameraRig" script=ExtResource("2_camera_manager")]
+
+[node name="ChaseCamera" type="Camera3D" parent="CameraRig" script=ExtResource("3_chase_cam")]
+current = true
+
+[node name="FPVCamera" type="Camera3D" parent="Aircraft" script=ExtResource("4_fpv_cam")]
+
+[node name="FreeOrbitCamera" type="Camera3D" parent="CameraRig" script=ExtResource("5_orbit_cam")]
+
+[node name="StationaryCamera" type="Camera3D" parent="CameraRig" script=ExtResource("6_stat_cam")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, 30)
+
+[node name="TowerCamera" type="Camera3D" parent="CameraRig" script=ExtResource("7_tower_cam")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 8, 40)
+
+[node name="Runway" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, 0)
+size = Vector3(10, 0.2, 100)
+material = SubResource("runway_mat")
+
+[node name="Grass" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.2, 0)
+size = Vector3(1000, 0.2, 1000)
+material = SubResource("grass_mat")
+
+[node name="HUD" type="CanvasLayer" parent="." script=ExtResource("9_hud")]
+
+[node name="MainSceneController" type="Node" parent="."]
+script = ExtResource("main_scene_controller")

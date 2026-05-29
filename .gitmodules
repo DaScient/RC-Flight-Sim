@@ -1,0 +1,12 @@
+[submodule "godot_project/addons/terrain_3d"]
+	path = godot_project/addons/terrain_3d
+	url = https://github.com/TokisanGames/Terrain3D
+
+[submodule "godot-cpp"]
+	path = godot-cpp
+	url = https://github.com/godotengine/godot-cpp
+	branch = godot-4.2
+
+[submodule "jsbsim"]
+	path = jsbsim
+	url = https://github.com/JSBSim-Team/jsbsim

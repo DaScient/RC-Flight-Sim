@@ -1,0 +1,61 @@
+# RC-Flight-Sim Build Prompt
+
+This file contains the original design specification used to scaffold the initial project.
+It serves as living documentation for the project's architecture and goals.
+
+==============================================================================
+PROJECT: RC-Flight-Sim
+REPOSITORY: https://github.com/DaScient/RC-Flight-Sim
+LICENSE: MIT for code, CC0/CC-BY-SA for art assets
+OWNER: DASCIENT, INC. | 2026
+==============================================================================
+
+## Core Design Pillars
+
+1. **Accessible & Lightweight**: Runs on Intel HD 4000 (GLES3/GL Compatibility), scaling to
+   high-end GPUs with Vulkan, dynamic shadows, post-processing.
+
+2. **Physics Realism**: Full 6-DOF aerodynamics via JSBSim (stall, spin, knife-edge, torque-roll,
+   P-factor, ground effect). Supports foam parkflyers, 3D aerobats, turbine jets.
+
+3. **Universal Controller Support**: Auto-recognises any USB RC dongle (HID joystick), gamepads
+   (Xbox, PlayStation), keyboard, and touch. Calibration wizard with endpoint/direction/deadzone/
+   curve settings.
+
+4. **Diverse Flying Environments**: Photorealistic outdoor airfields, indoor arenas, dynamic
+   time-of-day, weather (wind affects FDM).
+
+5. **Multiple Viewpoints**: Cockpit (FPV), chase (3rd-person spring-arm), stationary tripod
+   (pilot box), tower, free orbit.
+
+6. **Modular & Extensible**: Aircraft, sceneries, and physics are data-driven (XML/JSON).
+   Hot-loading of addons. Community can create content without touching engine code.
+
+## Technology Stack (100% free & open source)
+
+- **Game Engine**: Godot 4.x (MIT)
+- **Flight Dynamics**: JSBSim (LGPL) as GDExtension
+- **Terrain**: Terrain3D addon (MIT)
+- **Input**: Godot built-in Input system (SDL)
+- **Networking** (future): Godot ENet or WebRTC
+- **Audio**: Godot AudioServer + Freesound libraries
+- **UI**: Godot Control nodes, fully themable, localisation-ready
+- **Starter Assets**: CC0 models from Kenney.nl, OpenGameArt
+
+## Implementation Roadmap
+
+- [x] Phase 0: Repository scaffolding & project initialisation
+- [x] Phase 1: Input system (joystick detection, calibration wizard)
+- [x] Phase 2: Kinematic flight model (no JSBSim dependency)
+- [x] Phase 3: Camera system (FPV, Chase, Stationary, Tower, Free Orbit)
+- [x] Phase 4: JSBSim GDExtension stub (C++ wrapper)
+- [x] Phase 5: Trainer aircraft XML + JSON config
+- [x] Phase 6: Default airfield scenery (Terrain3D)
+- [x] Phase 7: HUD, main menu, settings menu
+- [x] Phase 8: CI/CD (GitHub Actions – all platforms)
+- [ ] Phase 9: Full JSBSim integration with compiled binaries
+- [ ] Phase 10: Aerobat and jet aircraft with JSBSim XMLs
+- [ ] Phase 11: Indoor arena scenery
+- [ ] Phase 12: Multiplayer (ENet)
+- [ ] Phase 13: Android & Web touch controls
+- [ ] Phase 14: Aircraft Wizard (in-editor aircraft creation tool)

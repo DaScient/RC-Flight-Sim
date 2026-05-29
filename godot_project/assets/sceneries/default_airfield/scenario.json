@@ -1,0 +1,14 @@
+{
+  "name":              "Default Airfield – Calm Morning",
+  "description":       "A flat grass airfield on a calm, clear morning. Good conditions for beginners.",
+  "wind_direction_deg": 270,
+  "wind_speed_ms":      2.0,
+  "wind_gust_max_ms":   4.0,
+  "wind_turbulence":    0.1,
+  "temperature_c":      18.0,
+  "pressure_hpa":      1013.25,
+  "start_time_h":       9.0,
+  "time_scale":         1.0,
+  "spawn_position":     [0.0, 0.1, 0.0],
+  "spawn_heading_deg":  270
+}
