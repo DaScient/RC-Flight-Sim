@@ -91,6 +91,7 @@ var voice_enabled: bool = true
 var _api_key: String = ""
 var _http: HTTPRequest = null
 var _tts: AgenticTTS = null
+var _voice: AgenticVoice = null
 var copilot: AgenticCopilot = null
 var _wizard: AgenticAircraftWizard = null
 var _scenery_gen: AgenticSceneryGenerator = null
@@ -136,9 +137,12 @@ func _ready() -> void:
 	copilot.disengaged.connect(func(reason: String) -> void: copilot_state_changed.emit(false, reason))
 	_wizard = AgenticAircraftWizard.new()
 	_scenery_gen = AgenticSceneryGenerator.new()
+	_voice = AgenticVoice.new()
+	_voice.recognized.connect(handle_voice_text)
 
 	_load_from_settings()
 	set_process(enabled)
+	set_process_unhandled_input(true)
 	_bootstrap_ui()
 	_register_builtin_skills()
 
@@ -246,6 +250,22 @@ func get_copilot_override(delta: float, state: Dictionary, channels: Dictionary)
 	if not enabled or copilot == null or not copilot.is_engaged:
 		return {}
 	return copilot.advance(delta, state, channels)
+
+## Push-to-talk: hold the `agentic_ptt` action to listen, release to transcribe.
+## The recognised text is routed through handle_voice_text().
+func _unhandled_input(event: InputEvent) -> void:
+	if not enabled or _voice == null or not _voice.is_available():
+		return
+	if not InputMap.has_action("agentic_ptt"):
+		return
+	if event.is_action_pressed("agentic_ptt"):
+		_voice.start_listening()
+	elif event.is_action_released("agentic_ptt"):
+		_voice.stop_listening()
+
+## Voice helper accessor (for settings UI to configure the desktop STT command).
+func get_voice() -> AgenticVoice:
+	return _voice
 
 # ---------------------------------------------------------------------------
 # Feature 3.3 - flight instructor tip
