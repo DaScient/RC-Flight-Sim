@@ -22,6 +22,7 @@ func _initialize() -> void:
 		TestSimConsole,
 		TestAgenticUtils,
 		TestAgenticPhase5,
+		TestAgenticIntegration,
 	]
 	for suite_class in suites:
 		var suite: Object = suite_class.new()

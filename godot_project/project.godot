@@ -30,6 +30,7 @@ SceneManager="*res://scripts/autoload/scene_manager.gd"
 Atmosphere="*res://scripts/flight_sim/atmosphere.gd"
 TelemetryTransmitter="*res://scripts/net/telemetry_transmitter.gd"
 AgenticManager="*res://scripts/autoload/agentic_manager.gd"
+FlightRecorder="*res://scripts/autoload/flight_recorder.gd"
 
 [display]
 
