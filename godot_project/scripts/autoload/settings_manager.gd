@@ -102,6 +102,14 @@ var _defaults: Dictionary = {
 	"particle_density":  1.0,        # 0..1 multiplier for FX particle counts
 	"render_scale":      1.0,        # 0.5..2.0 (web/perf scaling)
 	"cinematic_mode":    false,      # DoF + film grain toggle
+
+	# Experimental Agentic Mode (Phase 3 – see docs/agentic_mode.md). The API
+	# key is stored obfuscated (NOT hardened); endpoint is OpenAI-compatible.
+	"agentic_enabled":       false,
+	"agentic_endpoint":      "https://api.openai.com/v1/chat/completions",
+	"agentic_model":         "gpt-4o-mini",
+	"agentic_key_obf":       "",
+	"agentic_voice_enabled": true,
 }
 
 var _settings: Dictionary = {}
