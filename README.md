@@ -17,8 +17,8 @@ keyboard, and touch controls – out of the box, with no special drivers require
 
 | Feature | Details |
 |---------|---------|
-| **Physics** | Full 6-DOF aerodynamics via JSBSim (stall, spin, knife-edge, P-factor, ground effect) |
-| **Aircraft** | High-wing trainer, 3D aerobat, scale turbine jet – data-driven XML/JSON |
+| **Physics** | Full 6-DOF aerodynamics via JSBSim (stall, spin, knife-edge, P-factor, ground effect); built-in self-levelling multirotor (drone) model with PID stabilisation & motor mixing |
+| **Aircraft** | High-wing trainer, 3D aerobat, scale turbine jet, FPV quadcopter – data-driven XML/JSON |
 | **Controller** | Any USB RC dongle (HID joystick), Xbox, PlayStation, keyboard, touch; calibration wizard |
 | **Environments** | Outdoor airfield, indoor arena; dynamic time-of-day & weather (wind affects FDM) |
 | **Cameras** | FPV, Chase (spring-arm), Stationary (pilot box), Tower, Free Orbit |
@@ -121,6 +121,17 @@ The short version:
 2. Edit `aircraft.json` with your aircraft's parameters.
 3. (Optional) Write a JSBSim XML for high-fidelity aerodynamics.
 4. Add your aircraft to `AIRCRAFT_LIST` in `scripts/ui/main_menu.gd`.
+
+### Multirotors / Drones
+
+Set `"vehicle_type": "multirotor"` in an aircraft JSON to use the built-in
+self-levelling (angle-mode) drone model instead of the fixed-wing aerodynamics.
+The sticks command a target bank/pitch angle plus a yaw rate; cascaded PID
+controllers drive a quad-X motor mix that produces body thrust and torque
+(no JSBSim XML required). See `assets/aircraft/quad/quad.json` for a worked
+5-inch FPV quadcopter example. Tunable keys include `thrust_to_weight`,
+`arm_length_m`, `max_bank_deg`, `max_yaw_rate_dps`, the `inertia_*` moments and
+the `pid_attitude_*` / `pid_yaw_*` gains.
 
 ---
 

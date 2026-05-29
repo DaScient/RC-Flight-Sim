@@ -18,6 +18,7 @@ func _initialize() -> void:
 	# Test suites to execute. Add new TestXxx classes here.
 	var suites: Array = [
 		TestMathUtils,
+		TestMultirotorUtils,
 		TestConfigParser,
 		TestSimConsole,
 		TestAgenticUtils,
