@@ -31,7 +31,7 @@ jobs:
           - os: windows-2022
             lib_suffix: .dll
             cmake_extra: ""
-          - os: macos-13
+          - os: macos-latest
             lib_suffix: .dylib
             cmake_extra: "-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64"
 
