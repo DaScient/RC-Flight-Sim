@@ -28,6 +28,14 @@ signal scenario_received(scenario: Dictionary)
 signal debrief_received(text: String)
 signal request_failed(kind: String, message: String)
 signal copilot_state_changed(engaged: bool, info: String)
+# Phase 5 signals
+signal voice_command_parsed(command: Dictionary)
+signal aircraft_generated(result: Dictionary)
+signal scenery_generated(spec: Dictionary)
+signal commentary_received(text: String, spoken: bool)
+signal markers_received(result: Dictionary)
+signal rate_limited(cooldown_sec: float)
+signal usage_updated(tokens: int, cost_usd: float)
 
 # ---------------------------------------------------------------------------
 # Request kinds (routes the async response)
@@ -37,6 +45,13 @@ const KIND_GRADE := "grade"
 const KIND_COPILOT := "copilot"
 const KIND_SCENARIO := "scenario"
 const KIND_DEBRIEF := "debrief"
+# Phase 5 request kinds
+const KIND_VOICE := "voice"
+const KIND_AIRCRAFT := "aircraft"
+const KIND_SCENERY := "scenery"
+const KIND_COMMENTARY := "commentary"
+const KIND_MARKERS := "markers"
+const KIND_SKILL := "skill"
 
 # Settings keys (registered in SettingsManager defaults).
 const S_ENABLED := "agentic_enabled"
@@ -56,6 +71,11 @@ const SYSTEM_GRADER := "You are an RC flight examiner. Given a burst of telemetr
 const SYSTEM_COPILOT := "You are an RC autopilot. Output ONLY a JSON array of timed control keyframes like [{\"t\":0.0,\"aileron\":0.0,\"elevator\":-0.8,\"rudder\":0.0,\"throttle\":0.6}]. Values: aileron/elevator/rudder in [-1,1], throttle in [0,1]. Keep it under 12 seconds."
 const SYSTEM_SCENARIO := "You design RC flight practice scenarios. Output ONLY JSON: {\"aircraft\":..,\"scenery\":..,\"wind_speed_ms\":..,\"wind_dir_deg\":..,\"turbulence\":0-1,\"time_of_day\":0-24,\"description\":..}."
 const SYSTEM_DEBRIEF := "You are an RC flight coach. Given a flight log summary, write a short debrief: what went well, what to improve, and a 3-step practice plan. Max 120 words."
+# Phase 5 system prompts
+const SYSTEM_VOICE := "You translate a pilot's spoken command into ONE JSON object: {\"action\":<one of demonstrate_maneuver|set_wind|grade_landing|talk_through|generate_scenario|set_time_of_day>,\"params\":{..},\"say\":<short confirmation>}. params: set_wind{speed_ms,dir_deg,gusts}, set_time_of_day{hour}, demonstrate_maneuver/talk_through{maneuver}, generate_scenario{description}. Output ONLY JSON."
+const SYSTEM_AIRCRAFT := "You design RC model aircraft for a JSBSim flight sim. Output ONLY JSON: {\"name\":..,\"category\":..,\"model_description\":..,\"jsbsim_xml\":\"<fdm_config>...</fdm_config>\",\"tuning\":{\"expo\":{\"aileron\":0-1,\"elevator\":0-1,\"rudder\":0-1},\"rates\":{..},\"power_factor\":0.1-2}}. The XML must contain fdm_config, metrics, mass_balance and aerodynamics elements."
+const SYSTEM_SCENERY := "You design RC flying field sceneries. Output ONLY JSON: {\"name\":..,\"size_m\":100-4000,\"runway_length_m\":..,\"objects\":[{\"type\":<tree|hangar|windsock|pylon|tent|rock>,\"x\":..,\"z\":..}],\"wind_layers\":[{\"altitude_m\":..,\"speed_ms\":0-30,\"dir_deg\":0-360}],\"description\":..}."
+const SYSTEM_COMMENTARY := "You are an excited RC race commentator. Given the standings, produce one or two punchy sentences of live commentary. No preamble."
 
 # ---------------------------------------------------------------------------
 # Public state
@@ -71,11 +91,16 @@ var voice_enabled: bool = true
 var _api_key: String = ""
 var _http: HTTPRequest = null
 var _tts: AgenticTTS = null
+var _voice: AgenticVoice = null
 var copilot: AgenticCopilot = null
+var _wizard: AgenticAircraftWizard = null
+var _scenery_gen: AgenticSceneryGenerator = null
 
 var _busy: bool = false
 var _pending_kind: String = ""
-## Queue of pending requests: each entry is {kind, body}. Only one in flight.
+## The skill (if any) that owns the in-flight request, for routing the reply.
+var _pending_skill: AgenticSkill = null
+## Queue of pending requests: each entry is {kind, body, skill}. One in flight.
 var _queue: Array = []
 
 var _tip_accum: float = TIP_INTERVAL_SEC      # allow an early first tip
@@ -83,6 +108,19 @@ var _aircraft: Node = null
 ## Lists used to sanitise generated scenarios (kept in sync with main_menu.gd).
 var available_aircraft: PackedStringArray = ["trainer", "aerobat", "jet"]
 var available_scenery: PackedStringArray = ["default_airfield", "indoor_arena"]
+
+# Phase 5 state ------------------------------------------------------------
+## Shared overlay CanvasLayer that skills can attach UI to (null in headless).
+var _overlay_layer: CanvasLayer = null
+## Registered agentic skills, keyed by StringName id.
+var _skills: Dictionary = {}
+## Seconds (unix) until which the LLM is in a rate-limit cooldown.
+var _cooldown_until: float = 0.0
+## Optional cost tracking: cumulative estimated tokens and USD.
+var total_tokens: int = 0
+var total_cost_usd: float = 0.0
+var price_in_per_1k: float = 0.0
+var price_out_per_1k: float = 0.0
 
 # ---------------------------------------------------------------------------
 # Lifecycle
@@ -97,10 +135,16 @@ func _ready() -> void:
 	copilot = AgenticCopilot.new()
 	copilot.engaged.connect(func(lbl: String) -> void: copilot_state_changed.emit(true, lbl))
 	copilot.disengaged.connect(func(reason: String) -> void: copilot_state_changed.emit(false, reason))
+	_wizard = AgenticAircraftWizard.new()
+	_scenery_gen = AgenticSceneryGenerator.new()
+	_voice = AgenticVoice.new()
+	_voice.recognized.connect(handle_voice_text)
 
 	_load_from_settings()
 	set_process(enabled)
+	set_process_unhandled_input(true)
 	_bootstrap_ui()
+	_register_builtin_skills()
 
 ## Spawn the always-present Agentic overlay (hidden-hover toggle + in-flight
 ## HUD) on a high CanvasLayer so the feature works without per-scene wiring.
@@ -112,6 +156,7 @@ func _bootstrap_ui() -> void:
 	layer.name = "AgenticOverlay"
 	layer.layer = 100
 	add_child(layer)
+	_overlay_layer = layer
 
 	var toggle_script: GDScript = load("res://scripts/ui/agentic_toggle.gd")
 	if toggle_script != null:
@@ -190,6 +235,9 @@ func register_aircraft(aircraft: Node) -> void:
 func _process(delta: float) -> void:
 	if not enabled:
 		return
+	# Resume any queued requests once a rate-limit cooldown has elapsed.
+	if not _busy and not _queue.is_empty() and not _in_cooldown():
+		_pump_queue()
 	_tip_accum += delta
 	if _tip_accum >= TIP_INTERVAL_SEC and _aircraft != null:
 		_tip_accum = 0.0
@@ -202,6 +250,22 @@ func get_copilot_override(delta: float, state: Dictionary, channels: Dictionary)
 	if not enabled or copilot == null or not copilot.is_engaged:
 		return {}
 	return copilot.advance(delta, state, channels)
+
+## Push-to-talk: hold the `agentic_ptt` action to listen, release to transcribe.
+## The recognised text is routed through handle_voice_text().
+func _unhandled_input(event: InputEvent) -> void:
+	if not enabled or _voice == null or not _voice.is_available():
+		return
+	if not InputMap.has_action("agentic_ptt"):
+		return
+	if event.is_action_pressed("agentic_ptt"):
+		_voice.start_listening()
+	elif event.is_action_released("agentic_ptt"):
+		_voice.stop_listening()
+
+## Voice helper accessor (for settings UI to configure the desktop STT command).
+func get_voice() -> AgenticVoice:
+	return _voice
 
 # ---------------------------------------------------------------------------
 # Feature 3.3 - flight instructor tip
@@ -278,33 +342,221 @@ func request_debrief(snapshots: Array) -> void:
 	var prompt := "Flight log summary (%d samples):\n%s" % [lines.size(), "\n".join(lines)]
 	_enqueue(KIND_DEBRIEF, AgenticUtils.build_chat_request_body(model, SYSTEM_DEBRIEF, prompt))
 
+# ===========================================================================
+# PHASE 5 - public API
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# 5.2  Voice-first interaction
+# ---------------------------------------------------------------------------
+## Hand recognised speech [param text] to the LLM for structured command
+## parsing. When the LLM is offline the text is parsed locally (best effort).
+func handle_voice_text(text: String) -> void:
+	if text.strip_edges().is_empty():
+		return
+	if not _can_call_llm():
+		var local := AgenticUtils.parse_voice_command(text)
+		voice_command_parsed.emit(local)
+		execute_voice_command(local)
+		return
+	_enqueue(KIND_VOICE, AgenticUtils.build_chat_request_body(model, SYSTEM_VOICE, text))
+
+## Execute a parsed voice command (see AgenticUtils.parse_voice_command). Each
+## action routes to the relevant subsystem. Unknown actions are ignored.
+func execute_voice_command(command: Dictionary) -> void:
+	var action := String(command.get("action", "unknown"))
+	var params: Dictionary = command.get("params", {})
+	match action:
+		"demonstrate_maneuver":
+			request_maneuver(String(params.get("maneuver", "")))
+		"talk_through":
+			request_maneuver(String(params.get("maneuver", "")))
+		"grade_landing":
+			request_grade([_current_snapshot()])
+		"generate_scenario":
+			request_scenario(String(params.get("description", "")))
+		"set_wind":
+			_apply_wind(params)
+		"set_time_of_day":
+			_apply_time_of_day(float(params.get("hour", 12.0)))
+		_:
+			pass
+
+func _apply_wind(params: Dictionary) -> void:
+	var atmo := get_node_or_null("/root/Atmosphere")
+	if atmo != null and atmo.has_method("set_wind"):
+		atmo.set_wind(float(params.get("speed_ms", 0.0)),
+			float(params.get("dir_deg", 0.0)), bool(params.get("gusts", false)))
+
+func _apply_time_of_day(hour: float) -> void:
+	var atmo := get_node_or_null("/root/Atmosphere")
+	if atmo != null and atmo.has_method("set_time_of_day"):
+		atmo.set_time_of_day(hour)
+
+# ---------------------------------------------------------------------------
+# 5.1.1  AI-generated aircraft configuration
+# ---------------------------------------------------------------------------
+## Generate a JSBSim aircraft + tuning from a natural-language description.
+## Result delivered via [signal aircraft_generated].
+func request_aircraft_config(description: String) -> void:
+	if not _can_call_llm():
+		request_failed.emit(KIND_AIRCRAFT, "An API key is required to generate aircraft.")
+		return
+	_enqueue(KIND_AIRCRAFT, AgenticUtils.build_chat_request_body(
+		model, SYSTEM_AIRCRAFT, AgenticAircraftWizard.build_prompt(description)))
+
+# ---------------------------------------------------------------------------
+# 5.1.2  AI-generated sceneries
+# ---------------------------------------------------------------------------
+## Generate an airfield scenery spec from a description. Result delivered via
+## [signal scenery_generated]; callers can then AgenticSceneryGenerator.save_scene().
+func request_airfield(description: String) -> void:
+	if not _can_call_llm():
+		scenery_generated.emit(AgenticUtils.parse_scenery_spec({"description": description}))
+		return
+	_enqueue(KIND_SCENERY, AgenticUtils.build_chat_request_body(
+		model, SYSTEM_SCENERY, AgenticSceneryGenerator.build_prompt(description)))
+
+## Build and save a scene from a (validated) scenery spec. Returns the path.
+func save_generated_scenery(spec: Dictionary) -> String:
+	return _scenery_gen.save_scene(spec) if _scenery_gen != null else ""
+
+# ---------------------------------------------------------------------------
+# 5.4  Multiplayer AI commentator
+# ---------------------------------------------------------------------------
+## Generate live race commentary for the given standings (see
+## AgenticUtils.build_commentary_prompt). Result via [signal commentary_received].
+func request_commentary(entries: Array) -> void:
+	if not _can_call_llm():
+		return
+	_enqueue(KIND_COMMENTARY, AgenticUtils.build_chat_request_body(
+		model, SYSTEM_COMMENTARY, AgenticUtils.build_commentary_prompt(entries)))
+
+# ---------------------------------------------------------------------------
+# 5.5  Plugin API - skill registry
+# ---------------------------------------------------------------------------
+## Register an AgenticSkill instance. Returns false if a skill with the same id
+## is already registered.
+func register_skill(skill: AgenticSkill) -> bool:
+	if skill == null or _skills.has(skill.id):
+		return false
+	_skills[skill.id] = skill
+	skill.setup(self)
+	return true
+
+func unregister_skill(id: StringName) -> void:
+	if _skills.has(id):
+		(_skills[id] as AgenticSkill).teardown()
+		_skills.erase(id)
+
+func get_skill(id: StringName) -> AgenticSkill:
+	return _skills.get(id, null)
+
+func list_skills() -> Array:
+	return _skills.values()
+
+## Invoke a registered skill by id (calls its invoke() method if present).
+func invoke_skill(id: StringName) -> bool:
+	var skill: AgenticSkill = _skills.get(id, null)
+	if skill == null:
+		return false
+	if skill.has_method("invoke"):
+		skill.call("invoke")
+		return true
+	return false
+
+func _register_builtin_skills() -> void:
+	register_skill(SmokeWriterSkill.new())
+	register_skill(FormationTrainerSkill.new())
+
+# --- Hooks called by AgenticSkill helpers ---------------------------------
+## Public snapshot accessor for skills.
+func get_snapshot() -> Dictionary:
+	return _current_snapshot()
+
+## Send a skill-owned prompt; reply routed back to skill.on_llm_response().
+func send_skill_prompt(skill: AgenticSkill, system_prompt: String, user_prompt: String) -> bool:
+	if not _can_call_llm():
+		return false
+	_enqueue(KIND_SKILL, AgenticUtils.build_chat_request_body(model, system_prompt, user_prompt), skill)
+	return true
+
+func play_skill_maneuver(maneuver: Variant, label: String) -> bool:
+	if copilot == null:
+		return false
+	return copilot.engage(maneuver, label, _copilot_limits())
+
+func attach_skill_ui(control: Control) -> bool:
+	if _overlay_layer == null or control == null:
+		return false
+	_overlay_layer.add_child(control)
+	return true
+
+# ---------------------------------------------------------------------------
+# 5.6  Token usage & rate-limit awareness
+# ---------------------------------------------------------------------------
+## Set per-1K-token prices for the optional cost estimate (USD).
+func set_pricing(in_per_1k: float, out_per_1k: float) -> void:
+	price_in_per_1k = maxf(0.0, in_per_1k)
+	price_out_per_1k = maxf(0.0, out_per_1k)
+
+func _track_usage(prompt_text: String, completion_text: String) -> void:
+	var p_tokens := AgenticUtils.estimate_token_count(prompt_text)
+	var c_tokens := AgenticUtils.estimate_token_count(completion_text)
+	total_tokens += p_tokens + c_tokens
+	total_cost_usd += AgenticUtils.estimate_cost(p_tokens, c_tokens, price_in_per_1k, price_out_per_1k)
+	usage_updated.emit(total_tokens, total_cost_usd)
+
+func _in_cooldown() -> bool:
+	return Time.get_unix_time_from_system() < _cooldown_until
+
+## Seconds remaining in the current rate-limit cooldown (0 if none).
+func cooldown_remaining() -> float:
+	return maxf(0.0, _cooldown_until - Time.get_unix_time_from_system())
+
 # ---------------------------------------------------------------------------
 # HTTP plumbing (non-blocking, single in-flight request + queue)
 # ---------------------------------------------------------------------------
-func _enqueue(kind: String, body: Dictionary) -> void:
-	_queue.append({"kind": kind, "body": body})
+func _enqueue(kind: String, body: Dictionary, skill: AgenticSkill = null) -> void:
+	_queue.append({"kind": kind, "body": body, "skill": skill})
 	_pump_queue()
 
 func _pump_queue() -> void:
 	if _busy or _queue.is_empty() or _http == null:
+		return
+	# Honour an active rate-limit cooldown before sending anything else.
+	if _in_cooldown():
 		return
 	var item: Dictionary = _queue.pop_front()
 	var headers: PackedStringArray = [
 		"Content-Type: application/json",
 		"Authorization: "+_auth_scheme()+" "+_api_key,
 	]
-	var err := _http.request(api_endpoint, headers, HTTPClient.METHOD_POST, JSON.stringify(item["body"]))
+	var payload := JSON.stringify(item["body"])
+	var err := _http.request(api_endpoint, headers, HTTPClient.METHOD_POST, payload)
 	if err != OK:
 		request_failed.emit(String(item["kind"]), "HTTP request could not start (err %d)" % err)
 		_pump_queue()
 		return
 	_busy = true
 	_pending_kind = String(item["kind"])
+	_pending_skill = item.get("skill", null)
+	_track_usage(payload, "")  # count prompt tokens up front
 
-func _on_request_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+func _on_request_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray) -> void:
 	var kind := _pending_kind
+	var skill := _pending_skill
 	_busy = false
 	_pending_kind = ""
+	_pending_skill = null
+
+	# Rate limited: start a cooldown, surface it, and degrade to local tips.
+	if response_code == 429:
+		var cooldown := AgenticUtils.parse_rate_limit_cooldown(headers)
+		_cooldown_until = Time.get_unix_time_from_system() + cooldown
+		rate_limited.emit(cooldown)
+		_handle_failure(kind, "Rate limited (cooldown %.0fs)" % cooldown)
+		return
 
 	if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
 		_handle_failure(kind, "Network error (result %d, HTTP %d)" % [result, response_code])
@@ -318,10 +570,11 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		return
 
 	var content := AgenticUtils.extract_message_content(json.data)
-	_route_response(kind, content)
+	_track_usage("", content)  # count completion tokens
+	_route_response(kind, content, skill)
 	_pump_queue()
 
-func _route_response(kind: String, content: String) -> void:
+func _route_response(kind: String, content: String, skill: AgenticSkill = null) -> void:
 	match kind:
 		KIND_TIP:
 			if content.strip_edges() != "":
@@ -330,6 +583,7 @@ func _route_response(kind: String, content: String) -> void:
 			grade_received.emit(content.strip_edges())
 		KIND_DEBRIEF:
 			debrief_received.emit(content.strip_edges())
+			markers_received.emit(AgenticUtils.parse_debrief_markers(content))
 		KIND_SCENARIO:
 			var parsed: Variant = AgenticUtils.extract_json_block(content)
 			var data: Dictionary = parsed if parsed is Dictionary else {}
@@ -338,6 +592,24 @@ func _route_response(kind: String, content: String) -> void:
 		KIND_COPILOT:
 			if copilot != null and not copilot.engage(content, "AI maneuver", _copilot_limits()):
 				request_failed.emit(KIND_COPILOT, "Could not parse a valid maneuver.")
+		KIND_VOICE:
+			var command := AgenticUtils.parse_voice_command(content)
+			voice_command_parsed.emit(command)
+			execute_voice_command(command)
+		KIND_AIRCRAFT:
+			aircraft_generated.emit(_wizard.process_response(content))
+		KIND_SCENERY:
+			scenery_generated.emit(_scenery_gen.process_response(content))
+		KIND_COMMENTARY:
+			var text := content.strip_edges()
+			var spoken := false
+			if voice_enabled and _tts != null and text != "":
+				_tts.speak(text)
+				spoken = _tts.backend != AgenticTTS.Backend.NONE
+			commentary_received.emit(text, spoken)
+		KIND_SKILL:
+			if skill != null:
+				skill.on_llm_response(content)
 
 func _handle_failure(kind: String, message: String) -> void:
 	# Graceful degradation: tips fall back to local rule-based advice.
