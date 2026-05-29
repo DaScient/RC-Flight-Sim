@@ -100,6 +100,30 @@ func _ready() -> void:
 
 	_load_from_settings()
 	set_process(enabled)
+	_bootstrap_ui()
+
+## Spawn the always-present Agentic overlay (hidden-hover toggle + in-flight
+## HUD) on a high CanvasLayer so the feature works without per-scene wiring.
+## Skipped in headless/test runs where there is no display server.
+func _bootstrap_ui() -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	var layer := CanvasLayer.new()
+	layer.name = "AgenticOverlay"
+	layer.layer = 100
+	add_child(layer)
+
+	var toggle_script: GDScript = load("res://scripts/ui/agentic_toggle.gd")
+	if toggle_script != null:
+		var toggle: Control = toggle_script.new()
+		toggle.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+		toggle.position = Vector2(-150, 8)
+		layer.add_child(toggle)
+
+	var hud_script: GDScript = load("res://scripts/ui/agentic_hud.gd")
+	if hud_script != null:
+		var hud: Control = hud_script.new()
+		layer.add_child(hud)
 
 ## Pull persisted configuration from SettingsManager (if present).
 func _load_from_settings() -> void:
