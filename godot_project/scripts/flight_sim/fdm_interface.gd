@@ -91,6 +91,11 @@ func set_control_surface(surface: String, value: float) -> void:
 func get_state() -> Dictionary:
 	return state.duplicate()
 
+## Return a copy of the current control-surface command values.
+## Keys: aileron, elevator, rudder, throttle, flap (range [-1,1]; throttle [0,1]).
+func get_controls() -> Dictionary:
+	return _controls.duplicate()
+
 ## Load aircraft definition and initialize FDM.
 func load_aircraft(config_path: String) -> void:
 	var f := FileAccess.open(config_path, FileAccess.READ)
@@ -182,8 +187,9 @@ func _step_kinematic(delta: float, transform: Transform3D) -> void:
 		aoa_rad = atan2(-local_vel.y, -local_vel.z)
 	state["aoa_deg"] = rad_to_deg(aoa_rad)
 
-	# Dynamic pressure
-	var q := 0.5 * Atmosphere.air_density * airspeed * airspeed
+	# Dynamic pressure (uses altitude-dependent ISA density, Part 3B)
+	var rho := Atmosphere.get_density_at_altitude(transform.origin.y)
+	var q := 0.5 * rho * airspeed * airspeed
 	var wing_area: float = cfg.get("wing_area_m2", 0.25)
 
 	# Aerodynamic forces in body frame

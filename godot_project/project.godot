@@ -20,6 +20,7 @@ InputManager="*res://scripts/autoload/input_manager.gd"
 SettingsManager="*res://scripts/autoload/settings_manager.gd"
 SceneManager="*res://scripts/autoload/scene_manager.gd"
 Atmosphere="*res://scripts/flight_sim/atmosphere.gd"
+TelemetryTransmitter="*res://scripts/net/telemetry_transmitter.gd"
 
 [display]
 
